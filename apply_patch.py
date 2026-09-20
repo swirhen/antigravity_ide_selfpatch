@@ -101,15 +101,13 @@ def main():
     bundle_marker = "/* --- ANTIGRAVITY SESSION PATCH MODULE START --- */"
     bundle_end_marker = "/* --- ANTIGRAVITY SESSION PATCH MODULE END --- */"
     if bundle_marker in content:
-        # すでにバンドルされている場合は差し替え
-        import re
-        content = re.sub(
-            re.escape(bundle_marker) + r'.*?' + re.escape(bundle_end_marker),
-            f"{bundle_marker}\n{module_code}\n{bundle_end_marker}",
-            content,
-            flags=re.DOTALL
-        )
-        print("  [OK] 既存の組み込みモジュールを最新版に更新しました")
+        # すでにバンドルされている場合は差し替え (re.sub のエスケープエラーを避けるためスライス置換)
+        start_idx = content.find(bundle_marker)
+        end_idx = content.find(bundle_end_marker)
+        if start_idx != -1 and end_idx != -1:
+            end_idx += len(bundle_end_marker)
+            content = content[:start_idx] + f"{bundle_marker}\n{module_code}\n{bundle_end_marker}" + content[end_idx:]
+            print("  [OK] 既存の組み込みモジュールを最新版に更新しました")
     else:
         # 先頭に安全に挿入
         content = f"{bundle_marker}\n{module_code}\n{bundle_end_marker};\n" + content

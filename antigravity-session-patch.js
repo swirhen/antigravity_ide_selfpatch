@@ -500,13 +500,11 @@
                                         title: curSessionName,
                                         children: curSessionName
                                     }),
-                                    isCurrentPinned && E("span", {
-                                        className: "inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-500 text-[10px] font-medium shrink-0",
-                                        title: "現在のセッションはピン留めされています",
-                                        children: [
-                                            E($e, { name: "keep", size: 11, className: "text-amber-500 shrink-0" }),
-                                            E("span", { children: "ピン留め中" })
-                                        ]
+                                    isCurrentPinned && E($e, {
+                                        name: "keep",
+                                        size: 13,
+                                        className: "text-amber-500 shrink-0",
+                                        title: "現在のセッションはピン留めされています"
                                     }),
                                     E($e, { name: isOpen ? "keyboard_arrow_up" : "keyboard_arrow_down", size: 14, className: "text-muted-foreground shrink-0" })
                                 ]
