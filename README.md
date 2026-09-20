@@ -61,20 +61,22 @@ Google DeepMind の次世代 AI エディタ **Antigravity IDE** のチャット
 - **前提**: Python 3.8 以上がインストールされていること
 
 ### 手順
-1. 本リポジトリをクローンまたはダウンロードします：
-   ```bash
-   git clone https://github.com/swirhen/antigravity_ide_selfpatch.git
-   cd antigravity_ide_selfpatch
-   ```
 
-2. インストーラースクリプトを実行します：
+#### 方法 A: 配布用 ZIP をダウンロード（推奨・Git不要）
+1. [Releases ページ](https://github.com/swirhen/antigravity_ide_selfpatch/releases) から最新の `antigravity_ide_selfpatch_vX.X.X.zip` をダウンロードして解凍します。
+2. 解凍したフォルダでターミナルを開き、以下を実行します：
    ```bash
    python apply_patch.py
    ```
+3. IDE 上で `Ctrl + Shift + P`（Mac: `Cmd + Shift + P`）を押し、**`Developer: Reload Window`**（開発者: ウィンドウの再読み込み）を実行します。
 
-3. **Antigravity IDE を再読み込み**:
-   - IDE 上で `Ctrl + Shift + P`（Mac: `Cmd + Shift + P`）を押す
-   - **`Developer: Reload Window`**（開発者: ウィンドウの再読み込み）を実行（または IDE 自体を再起動）
+#### 方法 B: リポジトリをクローン
+```bash
+git clone https://github.com/swirhen/antigravity_ide_selfpatch.git
+cd antigravity_ide_selfpatch
+python apply_patch.py
+```
+実行後、同様に `Developer: Reload Window` を実行します。
 
 これだけで、すべての拡張機能が即座に有効化されます！
 

@@ -16,3 +16,7 @@ desktop.ini
 
 # Logs
 *.log
+
+# Release artifacts
+*.zip
+dist/

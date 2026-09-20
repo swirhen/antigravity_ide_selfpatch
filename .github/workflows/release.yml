@@ -1,0 +1,60 @@
+name: Release Package
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version tag (e.g. v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Determine Version
+        id: get_version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Package Release ZIP
+        run: |
+          VERSION="${{ steps.get_version.outputs.VERSION }}"
+          ZIP_NAME="antigravity_ide_selfpatch_${VERSION}.zip"
+          zip -j "$ZIP_NAME" apply_patch.py antigravity-session-patch.js README.md
+          echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.get_version.outputs.VERSION }}
+          name: Antigravity IDE Enhanced Patch ${{ steps.get_version.outputs.VERSION }}
+          files: ${{ env.ZIP_NAME }}
+          body: |
+            ## Antigravity IDE Enhanced Chat & Session Patch ${{ steps.get_version.outputs.VERSION }}
+
+            ### 📦 同梱内容
+            - `apply_patch.py`: 自動インストーラー（Windows / macOS / Linux 対応）
+            - `antigravity-session-patch.js`: 独立モジュール原本
+            - `README.md`: 使い方・ショートカット一覧・ロールバック手順
+
+            ### 🚀 インストール手順
+            1. 下記のアセットから `${{ env.ZIP_NAME }}` をダウンロードして解凍します。
+            2. 解凍したフォルダでターミナルを開き、以下を実行します：
+               ```bash
+               python apply_patch.py
+               ```
+            3. Antigravity IDE で `Ctrl + Shift + P` -> `Developer: Reload Window` を実行します。
