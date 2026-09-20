@@ -9,7 +9,9 @@ Google DeepMind の次世代 AI エディタ **Antigravity IDE** のチャット
 ## ✨ 主な機能
 
 ### 1. 📂 セッション一覧ドロワー (`F4` / `:resume`)
+
 チャットペイン最上部に、折りたたみ式のセッション一覧ドロワーを常設します。
+
 - **現在セッション最上位ソート**: 現在開いているセッションが、更新時刻やピン留め状態にかかわらず**常にリストの一番上（最上位）に固定表示**されます。
 - **視覚的インジケーター**: 現在開いているセッションの左端に**青いラジオアイコン**を表示（ピン留めされている場合は金色のピンも並列表示）。
 - **キーボード完全対応**: `↑` / `↓` で選択、`Enter` で即時切り替え、`Escape` で閉じます。
@@ -18,18 +20,24 @@ Google DeepMind の次世代 AI エディタ **Antigravity IDE** のチャット
 - **セッション削除**: ゴミ箱アイコンをクリックして不要なセッションを削除可能（現在セッション削除時は自動で新規会話を開始）。
 
 ### 2. ✏️ セッション名の変更 (`F2` / `:rename`)
+
 チャット欄で `F2` を押すか、`:rename <新しい名前>`（短縮 `:ren`）を入力して Enter を押すだけで、AI への余計な API リクエストを発生させずに**瞬時にセッション名を永続変更**できます。
+
 - 引数なしで実行した場合は、現在のタイトルがあらかじめ入力されたモーダルダイアログが出現。
 - 決定・キャンセル後、自動的にチャット入力欄へキーボードフォーカスが復帰します。
 
 ### 3. 📌 セッションのピン留め (`F6` / `:pin`)
+
 重要な会話セッションをワンクリックまたはキー操作でピン留めできます。
+
 - ドロワーヘッダーのピンボタン、または各行のピンアイコンをクリック。
 - ショートカットキー `F6`（ピン留め）/ `Ctrl + F6`（ピン解除）にも対応。
 - ピン留めされたセッションは、ドロワー内で上位に固定表示されます。
 
 ### 4. ⌨️ チャット改行パッチ（Enter改行 / Ctrl+Enter送信）
+
 日本語入力や長文プロンプトの作成を快適にするため、チャット入力欄のキー挙動を入れ替えます。
+
 - **`Enter`**: 改行（Shift+Enter を押す必要がなくなります）
 - **`Ctrl + Enter`** (Mac: `Cmd + Enter`): メッセージ送信
 - **コロンコマンド即時実行**: `:` から始まるコマンド（`:res`, `:ren`, `:p` 等）は、Ctrl を押さずに通常の `Enter` 1回で即座に実行されます。
@@ -57,25 +65,31 @@ Google DeepMind の次世代 AI エディタ **Antigravity IDE** のチャット
 ## 🛠️ インストール方法
 
 ### 動作環境
+
 - **OS**: Windows / macOS / Linux
 - **前提**: Python 3.8 以上がインストールされていること
 
 ### 手順
 
 #### 方法 A: 配布用 ZIP をダウンロード（推奨・Git不要）
+
 1. [Releases ページ](https://github.com/swirhen/antigravity_ide_selfpatch/releases) から最新の `antigravity_ide_selfpatch_vX.X.X.zip` をダウンロードして解凍します。
 2. 解凍したフォルダでターミナルを開き、以下を実行します：
+
    ```bash
    python apply_patch.py
    ```
+
 3. IDE 上で `Ctrl + Shift + P`（Mac: `Cmd + Shift + P`）を押し、**`Developer: Reload Window`**（開発者: ウィンドウの再読み込み）を実行します。
 
 #### 方法 B: リポジトリをクローン
+
 ```bash
 git clone https://github.com/swirhen/antigravity_ide_selfpatch.git
 cd antigravity_ide_selfpatch
 python apply_patch.py
 ```
+
 実行後、同様に `Developer: Reload Window` を実行します。
 
 これだけで、すべての拡張機能が即座に有効化されます！
@@ -97,7 +111,7 @@ python apply_patch.py
 
 本パッチはメンテナンス性と安全性を考慮した**モジュール分離アーキテクチャ**を採用しています：
 
-```
+```text
 antigravity_ide_selfpatch/
 ├── antigravity-session-patch.js                  # 独立モジュール原本 (UI & 全ロジック)
 ├── apply_patch.py                                # ワンクリック自動インストーラー
@@ -115,11 +129,13 @@ antigravity_ide_selfpatch/
 パッチを完全に解除し、元の公式状態に戻したい場合は以下のコマンドを実行します：
 
 ### Windows (PowerShell)
+
 ```powershell
 Copy-Item "$env:LOCALAPPDATA\Programs\Antigravity IDE\resources\app\out\vs\workbench\workbench.desktop.main.js.backup_before_patch" "$env:LOCALAPPDATA\Programs\Antigravity IDE\resources\app\out\vs\workbench\workbench.desktop.main.js" -Force
 ```
 
 ### macOS
+
 ```bash
 cp "/Applications/Antigravity IDE.app/Contents/Resources/app/out/vs/workbench/workbench.desktop.main.js.backup_before_patch" "/Applications/Antigravity IDE.app/Contents/Resources/app/out/vs/workbench/workbench.desktop.main.js"
 ```
@@ -129,4 +145,5 @@ cp "/Applications/Antigravity IDE.app/Contents/Resources/app/out/vs/workbench/wo
 ---
 
 ## ⚠️ 免責事項
+
 本ツールは Antigravity IDE のクライアント側ファイルを自己責任でパッチする非公式ツールです。パッチ適用前には自動的にバックアップが作成されますが、自己責任にてご使用ください。
