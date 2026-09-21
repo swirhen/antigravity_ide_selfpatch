@@ -71,7 +71,7 @@ Antigravity IDE の組み込みチャット（Agent Side Panel）において、
   antigravity_ide_selfpatch/
   ├── antigravity-session-patch.js                  # 独立モジュール本体
   ├── apply_patch.py                                # ワンクリック自動インストーラー
-  ├── Antigravity_セッション一覧・名前変更・改行パッチおぼえがき.txt # 本ドキュメント
+  ├── Antigravity IDE非公式パッチおぼえがき.txt       # 本ドキュメント
   └── backups/                                      # ステップ別・初期バックアップ格納先
 
 --------------------------------------------------------------------------------
