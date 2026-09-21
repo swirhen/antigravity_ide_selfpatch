@@ -122,6 +122,21 @@
 
     // サービス参照保持
     patch._commandService = null;
+    patch._keybindingService = null;
+
+    patch.getRenameTooltip = function () {
+        let keyLabel = "";
+        try {
+            if (patch._keybindingService && typeof patch._keybindingService.lookupKeybinding === "function") {
+                const kb = patch._keybindingService.lookupKeybinding("antigravity.session.rename");
+                if (kb && typeof kb.getLabel === "function") {
+                    keyLabel = kb.getLabel() || "";
+                }
+            }
+        } catch (_e) {}
+        if (!keyLabel) keyLabel = "F2";
+        return keyLabel ? `クリックしてセッション名を変更 (${keyLabel})` : "クリックしてセッション名を変更";
+    };
 
     patch.openKeybindings = function () {
         try {
@@ -715,16 +730,71 @@
             focusChatInput();
         };
 
+        // ヘッダータイトルのホバースタイル注入
+        try {
+            if (!document.getElementById("agy-header-title-style")) {
+                const style = document.createElement("style");
+                style.id = "agy-header-title-style";
+                style.textContent = `
+                    .flex.items-center.justify-between:has([data-tooltip-id="new-conversation-tooltip"]) .overflow-hidden.text-ellipsis.whitespace-nowrap {
+                        cursor: pointer !important;
+                        border-radius: 4px;
+                        padding: 1px 4px;
+                        margin: -1px -4px;
+                        transition: background-color 0.15s, opacity 0.15s;
+                    }
+                    .flex.items-center.justify-between:has([data-tooltip-id="new-conversation-tooltip"]) .overflow-hidden.text-ellipsis.whitespace-nowrap:hover {
+                        text-decoration: underline !important;
+                        background-color: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.2)) !important;
+                        opacity: 0.9 !important;
+                    }
+                `;
+                document.head.appendChild(style);
+            }
+        } catch (_e) {}
+
+        // ヘッダーセッションタイトルのクリックイベント (クリックで名前変更)
+        const onHeaderTitleClick = (e) => {
+            const target = e.target;
+            if (!target) return;
+            const titleEl = target.closest(".overflow-hidden.text-ellipsis.whitespace-nowrap");
+            if (titleEl && !titleEl.closest("#session-drawer-container") && !titleEl.closest("#agy-patch-settings-overlay")) {
+                const headerEl = titleEl.closest(".flex.items-center.justify-between");
+                if (headerEl && headerEl.querySelector('[data-tooltip-id="new-conversation-tooltip"]')) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onRename();
+                }
+            }
+        };
+
+        // ヘッダーセッションタイトルのホバー時にツールチップを動的更新
+        const onHeaderTitleHover = (e) => {
+            const target = e.target;
+            if (!target) return;
+            const titleEl = target.closest(".overflow-hidden.text-ellipsis.whitespace-nowrap");
+            if (titleEl && !titleEl.closest("#session-drawer-container") && !titleEl.closest("#agy-patch-settings-overlay")) {
+                const headerEl = titleEl.closest(".flex.items-center.justify-between");
+                if (headerEl && headerEl.querySelector('[data-tooltip-id="new-conversation-tooltip"]')) {
+                    titleEl.title = patch.getRenameTooltip();
+                }
+            }
+        };
+
         window.addEventListener("action-session-rename", onRename);
         window.addEventListener("action-session-pin", onPin);
         window.addEventListener("action-session-unpin", onUnpin);
         window.addEventListener("action-session-new", onNew);
+        document.addEventListener("click", onHeaderTitleClick, true);
+        document.addEventListener("mouseenter", onHeaderTitleHover, true);
 
         return () => {
             window.removeEventListener("action-session-rename", onRename);
             window.removeEventListener("action-session-pin", onPin);
             window.removeEventListener("action-session-unpin", onUnpin);
             window.removeEventListener("action-session-new", onNew);
+            document.removeEventListener("click", onHeaderTitleClick, true);
+            document.removeEventListener("mouseenter", onHeaderTitleHover, true);
         };
     };
 
@@ -1081,15 +1151,8 @@
                                 children: [
                                     E($e, { name: "history", size: 14, className: "text-muted-foreground shrink-0" }),
                                     E("span", {
-                                        className: "font-medium text-foreground truncate max-w-[200px] sm:max-w-[280px]",
-                                        title: curSessionName,
-                                        children: curSessionName
-                                    }),
-                                    isCurrentPinned && E($e, {
-                                        name: "keep",
-                                        size: 13,
-                                        className: "text-amber-500 shrink-0",
-                                        title: "現在のセッションはピン留めされています"
+                                        className: "font-medium text-foreground truncate",
+                                        children: "セッションリストを開く"
                                     }),
                                     E($e, { name: isOpen ? "keyboard_arrow_up" : "keyboard_arrow_down", size: 14, className: "text-muted-foreground shrink-0" })
                                 ]
@@ -1227,19 +1290,15 @@
                                                     className: "flex items-center gap-1.5 min-w-0 pr-2",
                                                     children: [
                                                         isActive
-                                                            ? E("div", {
-                                                                className: "flex items-center gap-1 shrink-0",
-                                                                children: [
-                                                                    E("span", {
-                                                                        className: "w-3 h-3 rounded-full border border-primary flex items-center justify-center shrink-0",
-                                                                        children: E("span", { className: "w-1.5 h-1.5 rounded-full bg-primary" })
-                                                                    }),
-                                                                    isPinned && E($e, { name: "keep", size: 11, className: "text-amber-500 shrink-0" })
-                                                                ]
+                                                            ? E("span", {
+                                                                className: "w-3 h-3 rounded-full border border-primary flex items-center justify-center shrink-0",
+                                                                children: E("span", { className: "w-1.5 h-1.5 rounded-full bg-primary" })
                                                             })
-                                                            : isPinned
-                                                                ? E($e, { name: "keep", size: 12, className: "text-amber-500 shrink-0" })
-                                                                : E($e, { name: "chat_bubble", size: 12, className: "text-muted-foreground shrink-0 opacity-60 group-hover:opacity-100" }),
+                                                            : E($e, {
+                                                                name: "chat_bubble",
+                                                                size: 12,
+                                                                className: "text-muted-foreground shrink-0 opacity-60 group-hover:opacity-100"
+                                                            }),
                                                         E("span", { className: "truncate", title: title, children: title }),
                                                         isActive && E("span", {
                                                             className: "text-[10px] px-1 py-0.2 rounded bg-primary/20 text-primary font-normal shrink-0",
