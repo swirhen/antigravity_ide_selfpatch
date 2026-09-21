@@ -8,6 +8,142 @@
     const patch = {};
 
     // -------------------------------------------------------------------------
+    // 0. 設定マネージャー (Config Manager: localStorage 連携)
+    // -------------------------------------------------------------------------
+    const CONFIG_KEY = 'antigravity.patch.config';
+
+    const DEFAULT_CONFIG = {
+        enterSendDisabled: true, // true: Enter改行/Ctrl+Enter送信, false: Enter送信/Shift+Enter改行
+        commands: {
+            resume: { primary: "resume", short: "res", label: "セッション一覧表示" },
+            rename: { primary: "rename", short: "ren", label: "セッション名変更" },
+            pin:    { primary: "pin",    short: "p",   label: "セッションをピン留め" },
+            unpin:  { primary: "unpin",  short: "up",  label: "ピン留めを解除" },
+            new:    { primary: "new",    short: "n",   label: "新規セッション開始" }
+        }
+    };
+
+    function escapeRegExp(string) {
+        return (string || "").replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    function cleanCmdName(val) {
+        return (val || "").trim().replace(/^:+/, "");
+    }
+
+    patch.getConfig = function () {
+        try {
+            const raw = localStorage.getItem(CONFIG_KEY);
+            if (!raw) return JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+            const parsed = JSON.parse(raw);
+            return {
+                enterSendDisabled: parsed.enterSendDisabled !== undefined ? !!parsed.enterSendDisabled : DEFAULT_CONFIG.enterSendDisabled,
+                commands: {
+                    resume: {
+                        primary: cleanCmdName(parsed.commands?.resume?.primary) || DEFAULT_CONFIG.commands.resume.primary,
+                        short: cleanCmdName(parsed.commands?.resume?.short) || DEFAULT_CONFIG.commands.resume.short,
+                        label: DEFAULT_CONFIG.commands.resume.label
+                    },
+                    rename: {
+                        primary: cleanCmdName(parsed.commands?.rename?.primary) || DEFAULT_CONFIG.commands.rename.primary,
+                        short: cleanCmdName(parsed.commands?.rename?.short) || DEFAULT_CONFIG.commands.rename.short,
+                        label: DEFAULT_CONFIG.commands.rename.label
+                    },
+                    pin: {
+                        primary: cleanCmdName(parsed.commands?.pin?.primary) || DEFAULT_CONFIG.commands.pin.primary,
+                        short: cleanCmdName(parsed.commands?.pin?.short) || DEFAULT_CONFIG.commands.pin.short,
+                        label: DEFAULT_CONFIG.commands.pin.label
+                    },
+                    unpin: {
+                        primary: cleanCmdName(parsed.commands?.unpin?.primary) || DEFAULT_CONFIG.commands.unpin.primary,
+                        short: cleanCmdName(parsed.commands?.unpin?.short) || DEFAULT_CONFIG.commands.unpin.short,
+                        label: DEFAULT_CONFIG.commands.unpin.label
+                    },
+                    new: {
+                        primary: cleanCmdName(parsed.commands?.new?.primary) || DEFAULT_CONFIG.commands.new.primary,
+                        short: cleanCmdName(parsed.commands?.new?.short) || DEFAULT_CONFIG.commands.new.short,
+                        label: DEFAULT_CONFIG.commands.new.label
+                    }
+                }
+            };
+        } catch (_e) {
+            return JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+        }
+    };
+
+    patch.saveConfig = function (cfg) {
+        try {
+            localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg));
+            return true;
+        } catch (e) {
+            console.error("Failed to save patch config:", e);
+            return false;
+        }
+    };
+
+    patch.resetConfig = function () {
+        try {
+            localStorage.removeItem(CONFIG_KEY);
+            return true;
+        } catch (_e) {
+            return false;
+        }
+    };
+
+    // コロンコマンドかどうか判定
+    patch.isColonCommand = function (rawText) {
+        const txt = (rawText || "").trim();
+        if (!txt.startsWith(":")) return false;
+        const cfg = patch.getConfig();
+        for (const key of Object.keys(cfg.commands)) {
+            const cmd = cfg.commands[key];
+            const parts = [cmd.primary, cmd.short].map(cleanCmdName).filter(Boolean).map(escapeRegExp);
+            if (parts.length === 0) continue;
+            const reg = new RegExp(`^:(${parts.join("|")})(\\s.*)?$`, "i");
+            if (reg.test(txt)) return true;
+        }
+        return false;
+    };
+
+    // 改行・送信判定
+    patch.shouldSendMessage = function (ev, text) {
+        const isCmd = patch.isColonCommand(text);
+        if (isCmd) return true; // コロンコマンドは常に Enter で即時実行
+
+        const cfg = patch.getConfig();
+        if (cfg.enterSendDisabled) {
+            // Enter改行 / Ctrl+Enter(Cmd+Enter) 送信
+            return !!(ev.ctrlKey || ev.metaKey);
+        } else {
+            // 通常チャット動作: Enter 送信 / Shift+Enter 改行
+            return !ev.shiftKey && !ev.ctrlKey && !ev.metaKey;
+        }
+    };
+
+    // サービス参照保持
+    patch._commandService = null;
+
+    patch.openKeybindings = function () {
+        try {
+            if (patch._commandService && typeof patch._commandService.executeCommand === "function") {
+                patch._commandService.executeCommand("workbench.action.openGlobalKeybindingsFile");
+            } else {
+                window.dispatchEvent(new CustomEvent("action-session-openKeybindings"));
+            }
+        } catch (err) {
+            console.error("Failed to open keybindings file:", err);
+        }
+    };
+
+    patch.reloadWindow = function () {
+        if (patch._commandService && typeof patch._commandService.executeCommand === "function") {
+            patch._commandService.executeCommand("workbench.action.reloadWindow");
+        } else {
+            window.location.reload();
+        }
+    };
+
+    // -------------------------------------------------------------------------
     // 1. ユーティリティ: チャット入力欄への安全なフォーカス復帰
     // -------------------------------------------------------------------------
     function focusChatInput() {
@@ -105,6 +241,418 @@
     patch.showPromptDialog = showPromptDialog;
 
     // -------------------------------------------------------------------------
+    // 2.1 独自設定ダイアログ (Settings Dialog: TrustedHTML & CSP 完全準拠)
+    // -------------------------------------------------------------------------
+    function showSettingsDialog() {
+        try {
+            // すでにダイアログが開いていれば二重起動を防止
+            if (document.getElementById("agy-patch-settings-overlay")) {
+                return;
+            }
+
+            const config = patch.getConfig();
+
+            const overlay = document.createElement("div");
+            overlay.id = "agy-patch-settings-overlay";
+            overlay.style.cssText = "position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.65);backdrop-filter:blur(3px);z-index:999999;display:flex;align-items:center;justify-content:center;font-family:var(--vscode-font-family,-apple-system,BlinkMacSystemFont,sans-serif);opacity:1;";
+
+            const modal = document.createElement("div");
+            modal.style.cssText = "background:var(--vscode-editor-background,#1e1e1e);color:var(--vscode-foreground,#ccc);border:1px solid var(--vscode-widget-border,#454545);border-radius:8px;box-shadow:0 16px 36px rgba(0,0,0,0.6);width:540px;max-width:92vw;max-height:86vh;display:flex;flex-direction:column;overflow:hidden;";
+
+            // ヘッダー
+            const header = document.createElement("div");
+            header.style.cssText = "display:flex;align-items:center;justify-content:space-between;padding:12px 18px;border-bottom:1px solid var(--vscode-widget-border,#333);background:var(--vscode-sideBar-background,#252526);";
+
+            const titleBox = document.createElement("div");
+            titleBox.style.cssText = "display:flex;align-items:center;gap:8px;font-weight:600;font-size:13px;color:var(--vscode-foreground,#fff);";
+
+            const gearIcon = document.createElement("span");
+            gearIcon.textContent = "\u2699"; // ⚙
+            gearIcon.style.cssText = "font-size:15px;line-height:1;";
+
+            const titleText = document.createElement("span");
+            titleText.textContent = "Antigravity チャットペインパッチ設定";
+
+            titleBox.appendChild(gearIcon);
+            titleBox.appendChild(titleText);
+
+            const closeBtn = document.createElement("button");
+            closeBtn.textContent = "\u00D7"; // ×
+            closeBtn.style.cssText = "background:transparent;border:none;color:var(--vscode-foreground,#aaa);font-size:18px;line-height:1;cursor:pointer;padding:2px 6px;border-radius:4px;";
+            closeBtn.onmouseenter = () => closeBtn.style.color = "var(--vscode-foreground,#fff)";
+            closeBtn.onmouseleave = () => closeBtn.style.color = "var(--vscode-foreground,#aaa)";
+
+            header.appendChild(titleBox);
+            header.appendChild(closeBtn);
+
+            // コンテンツ領域
+            const body = document.createElement("div");
+            body.style.cssText = "padding:16px 20px;overflow-y:auto;display:flex;flex-direction:column;gap:18px;font-size:12px;line-height:1.5;";
+
+            // 1. チャット送信トグルセクション
+            const sectionSend = document.createElement("div");
+            sectionSend.style.cssText = "display:flex;flex-direction:column;gap:6px;";
+
+            const sendTitle = document.createElement("div");
+            sendTitle.textContent = "チャット送信ショートカット";
+            sendTitle.style.cssText = "font-weight:600;font-size:12px;color:var(--vscode-foreground,#eee);border-bottom:1px solid var(--vscode-widget-border,#333);padding-bottom:4px;";
+
+            // トグルスイッチの状態
+            let isEnterSendDisabled = config.enterSendDisabled;
+
+            const sendRow = document.createElement("div");
+            sendRow.style.cssText = "display:flex;align-items:flex-start;gap:12px;cursor:pointer;margin-top:4px;user-select:none;";
+
+            // スイッチトラック (外枠カプセル)
+            const switchTrack = document.createElement("div");
+            switchTrack.style.cssText = "position:relative;width:38px;height:20px;border-radius:10px;cursor:pointer;flex-shrink:0;margin-top:2px;transition:background-color 0.2s ease, border-color 0.2s ease;box-sizing:border-box;border:1px solid rgba(255,255,255,0.2);";
+
+            // スイッチつまみ (内部の白い丸)
+            const switchThumb = document.createElement("div");
+            switchThumb.style.cssText = "position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#ffffff;box-shadow:0 1px 3px rgba(0,0,0,0.4);transition:transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);";
+            switchTrack.appendChild(switchThumb);
+
+            const updateToggleUI = () => {
+                if (isEnterSendDisabled) {
+                    switchTrack.style.background = "var(--vscode-button-background,#0e639c)";
+                    switchTrack.style.borderColor = "var(--vscode-button-background,#0e639c)";
+                    switchThumb.style.transform = "translateX(18px)";
+                } else {
+                    switchTrack.style.background = "var(--vscode-input-background,#3c3c3c)";
+                    switchTrack.style.borderColor = "var(--vscode-input-border,#555)";
+                    switchThumb.style.transform = "translateX(0px)";
+                }
+            };
+            updateToggleUI();
+
+            sendRow.onclick = (e) => {
+                e.preventDefault();
+                isEnterSendDisabled = !isEnterSendDisabled;
+                updateToggleUI();
+            };
+
+            const sendLabelContainer = document.createElement("div");
+            sendLabelContainer.style.cssText = "display:flex;flex-direction:column;gap:2px;flex:1;";
+
+            const sendLabelText = document.createElement("span");
+            sendLabelText.textContent = "チャットを Enter で送信しない (Ctrl+Enter で送信)";
+            sendLabelText.style.cssText = "font-weight:500;color:var(--vscode-foreground,#fff);";
+
+            const sendDesc = document.createElement("span");
+            sendDesc.textContent = "ON の場合は Enter で改行し、Ctrl+Enter (Cmd+Enter) でメッセージを送信します。OFF の場合は通常のチャット動作（Enter で送信、Shift+Enter で改行）になります。※コロンコマンドはいずれの場合も Enter で即時実行されます。";
+            sendDesc.style.cssText = "font-size:11px;color:var(--vscode-descriptionForeground,#888);";
+
+            sendLabelContainer.appendChild(sendLabelText);
+            sendLabelContainer.appendChild(sendDesc);
+            sendRow.appendChild(switchTrack);
+            sendRow.appendChild(sendLabelContainer);
+
+            sectionSend.appendChild(sendTitle);
+            sectionSend.appendChild(sendRow);
+
+            // 2. コロンコマンドカスタマイズセクション
+            const sectionCmds = document.createElement("div");
+            sectionCmds.style.cssText = "display:flex;flex-direction:column;gap:8px;";
+
+            const cmdsTitle = document.createElement("div");
+            cmdsTitle.textContent = "チャットコマンド設定";
+            cmdsTitle.style.cssText = "font-weight:600;font-size:12px;color:var(--vscode-foreground,#eee);border-bottom:1px solid var(--vscode-widget-border,#333);padding-bottom:4px;";
+
+            const cmdsDesc = document.createElement("div");
+            cmdsDesc.textContent = "チャット入力欄に「:コマンド名」を入力して Enter を押すと実行される機能です。コマンド名を自由に変更できます（先頭の「:」は自動補完）。";
+            cmdsDesc.style.cssText = "font-size:11px;color:var(--vscode-descriptionForeground,#888);";
+
+            const cmdTable = document.createElement("div");
+            cmdTable.style.cssText = "display:grid;grid-template-columns:140px 1fr 1fr;gap:8px;align-items:center;background:var(--vscode-sideBar-background,#252526);padding:10px 12px;border-radius:6px;border:1px solid var(--vscode-widget-border,#333);";
+
+            // テーブルヘッダー（DOM API で安全に構築）
+            const th1 = document.createElement("div");
+            th1.textContent = "機能";
+            th1.style.cssText = "font-weight:600;font-size:11px;color:var(--vscode-descriptionForeground,#aaa);";
+            const th2 = document.createElement("div");
+            th2.textContent = "通常コマンド";
+            th2.style.cssText = "font-weight:600;font-size:11px;color:var(--vscode-descriptionForeground,#aaa);";
+            const th3 = document.createElement("div");
+            th3.textContent = "短縮コマンド";
+            th3.style.cssText = "font-weight:600;font-size:11px;color:var(--vscode-descriptionForeground,#aaa);";
+            cmdTable.appendChild(th1);
+            cmdTable.appendChild(th2);
+            cmdTable.appendChild(th3);
+
+            const cmdInputs = {};
+            const cmdList = [
+                { id: "resume", label: "セッション一覧" },
+                { id: "rename", label: "セッション名変更" },
+                { id: "pin",    label: "ピン留め" },
+                { id: "unpin",  label: "ピン留め解除" },
+                { id: "new",    label: "新規会話" }
+            ];
+
+            cmdList.forEach(item => {
+                const curCmd = config.commands[item.id] || DEFAULT_CONFIG.commands[item.id];
+
+                const labelEl = document.createElement("div");
+                labelEl.textContent = item.label;
+                labelEl.style.cssText = "font-size:11px;color:var(--vscode-foreground,#eee);";
+
+                const primInput = document.createElement("input");
+                primInput.type = "text";
+                primInput.value = ":" + cleanCmdName(curCmd.primary);
+                primInput.style.cssText = "width:100%;box-sizing:border-box;background:var(--vscode-input-background,#3c3c3c);color:var(--vscode-input-foreground,#fff);border:1px solid var(--vscode-input-border,#555);border-radius:3px;padding:4px 6px;font-size:11px;outline:none;";
+
+                const shortInput = document.createElement("input");
+                shortInput.type = "text";
+                shortInput.value = ":" + cleanCmdName(curCmd.short);
+                shortInput.style.cssText = "width:100%;box-sizing:border-box;background:var(--vscode-input-background,#3c3c3c);color:var(--vscode-input-foreground,#fff);border:1px solid var(--vscode-input-border,#555);border-radius:3px;padding:4px 6px;font-size:11px;outline:none;";
+
+                cmdInputs[item.id] = { primary: primInput, short: shortInput };
+
+                cmdTable.appendChild(labelEl);
+                cmdTable.appendChild(primInput);
+                cmdTable.appendChild(shortInput);
+            });
+
+            sectionCmds.appendChild(cmdsTitle);
+            sectionCmds.appendChild(cmdsDesc);
+            sectionCmds.appendChild(cmdTable);
+
+            // 3. キーボードショートカット設定セクション
+            const sectionKb = document.createElement("div");
+            sectionKb.style.cssText = "display:flex;flex-direction:column;gap:6px;";
+
+            const kbTitle = document.createElement("div");
+            kbTitle.textContent = "キーボードショートカット設定";
+            kbTitle.style.cssText = "font-weight:600;font-size:12px;color:var(--vscode-foreground,#eee);border-bottom:1px solid var(--vscode-widget-border,#333);padding-bottom:4px;";
+
+            const kbCard = document.createElement("div");
+            kbCard.style.cssText = "display:flex;flex-direction:column;gap:10px;background:var(--vscode-sideBar-background,#252526);padding:10px 12px;border-radius:6px;border:1px solid var(--vscode-widget-border,#333);";
+
+            const kbHeaderRow = document.createElement("div");
+            kbHeaderRow.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px;";
+
+            const kbDesc = document.createElement("div");
+            kbDesc.style.cssText = "font-size:11px;color:var(--vscode-descriptionForeground,#aaa);line-height:1.4;";
+            const kbDescStrong = document.createElement("strong");
+            kbDescStrong.textContent = "keybindings.json";
+            kbDesc.appendChild(document.createTextNode("キーボードショートカットを変更する場合は、"));
+            kbDesc.appendChild(kbDescStrong);
+            kbDesc.appendChild(document.createTextNode(" で該当箇所を修正して下さい。"));
+
+            // 「keybindings.json を開く」ボタン
+            const kbBtn = document.createElement("button");
+            kbBtn.type = "button";
+            kbBtn.textContent = "keybindings.json を開く";
+            kbBtn.style.cssText = "padding:5px 12px;font-size:11px;border-radius:3px;background:var(--vscode-button-secondaryBackground,#3a3d41);color:var(--vscode-button-secondaryForeground,#fff);border:1px solid var(--vscode-widget-border,#555);cursor:pointer;white-space:nowrap;transition:background 0.1s;";
+            kbBtn.onmouseenter = () => kbBtn.style.background = "var(--vscode-button-secondaryHoverBackground,#45494e)";
+            kbBtn.onmouseleave = () => kbBtn.style.background = "var(--vscode-button-secondaryBackground,#3a3d41)";
+            kbBtn.onclick = (ev) => {
+                ev?.stopPropagation();
+                overlay.remove();
+                setTimeout(() => {
+                    patch.openKeybindings();
+                }, 80);
+            };
+
+            kbHeaderRow.appendChild(kbDesc);
+            kbHeaderRow.appendChild(kbBtn);
+
+            // 設定項目一覧テーブル
+            const kbItemsTable = document.createElement("table");
+            kbItemsTable.style.cssText = "width:100%;border-collapse:collapse;font-size:11px;margin-top:2px;";
+
+            const thead = document.createElement("thead");
+            const theadTr = document.createElement("tr");
+            theadTr.style.cssText = "color:var(--vscode-descriptionForeground,#888);border-bottom:1px solid var(--vscode-widget-border,#3a3d41);text-align:left;";
+
+            const thCmd = document.createElement("th");
+            thCmd.textContent = "コマンド (command)";
+            thCmd.style.padding = "3px 6px";
+
+            const thKey = document.createElement("th");
+            thKey.textContent = "規定キー (key)";
+            thKey.style.padding = "3px 6px";
+
+            const thFunc = document.createElement("th");
+            thFunc.textContent = "機能内容";
+            thFunc.style.padding = "3px 6px";
+
+            theadTr.appendChild(thCmd);
+            theadTr.appendChild(thKey);
+            theadTr.appendChild(thFunc);
+            thead.appendChild(theadTr);
+            kbItemsTable.appendChild(thead);
+
+            const kbItems = [
+                { cmd: "antigravity.session.openDrawer", key: "F4", desc: "セッション一覧ドロワー開閉" },
+                { cmd: "antigravity.session.rename", key: "F2", desc: "セッション名変更" },
+                { cmd: "antigravity.session.pin", key: "F6", desc: "セッションをピン留め" },
+                { cmd: "antigravity.session.unpin", key: "Ctrl + F6", desc: "ピン留めを解除" },
+                { cmd: "antigravity.session.new", key: "Ctrl + F4", desc: "新しいセッション開始" }
+            ];
+
+            const tbody = document.createElement("tbody");
+            kbItems.forEach(item => {
+                const tr = document.createElement("tr");
+                tr.style.cssText = "border-bottom:1px solid rgba(255,255,255,0.05);";
+
+                const tdCmd = document.createElement("td");
+                tdCmd.style.cssText = "padding:4px 6px;font-family:var(--vscode-editor-font-family,monospace);color:var(--vscode-textLink-foreground,#4fc1ff);user-select:all;";
+                tdCmd.textContent = item.cmd;
+
+                const tdKey = document.createElement("td");
+                tdKey.style.cssText = "padding:4px 6px;white-space:nowrap;";
+                const kbd = document.createElement("kbd");
+                kbd.textContent = item.key;
+                kbd.style.cssText = "padding:1px 5px;background:var(--vscode-keybindingLabel-background,rgba(128,128,128,0.17));border:1px solid var(--vscode-keybindingLabel-border,rgba(51,51,51,0.4));border-radius:3px;font-size:10px;font-family:inherit;color:var(--vscode-keybindingLabel-foreground,#ccc);";
+                tdKey.appendChild(kbd);
+
+                const tdFunc = document.createElement("td");
+                tdFunc.style.cssText = "padding:4px 6px;color:var(--vscode-foreground,#ccc);";
+                tdFunc.textContent = item.desc;
+
+                tr.appendChild(tdCmd);
+                tr.appendChild(tdKey);
+                tr.appendChild(tdFunc);
+                tbody.appendChild(tr);
+            });
+            kbItemsTable.appendChild(tbody);
+
+            kbCard.appendChild(kbHeaderRow);
+            kbCard.appendChild(kbItemsTable);
+            sectionKb.appendChild(kbTitle);
+            sectionKb.appendChild(kbCard);
+
+            // 4. 注意書きアラート（DOM API で安全に構築）
+            const alertBox = document.createElement("div");
+            alertBox.style.cssText = "display:flex;align-items:flex-start;gap:8px;padding:8px 12px;border-radius:4px;background:rgba(234,179,8,0.1);border:1px solid rgba(234,179,8,0.3);color:var(--vscode-foreground,#ddd);font-size:11px;";
+
+            const alertIcon = document.createElement("span");
+            alertIcon.textContent = "\u26A0"; // ⚠️
+            alertIcon.style.cssText = "color:#eab308;font-size:13px;line-height:1;margin-top:1px;";
+
+            const alertText = document.createElement("div");
+            const alertBold = document.createElement("strong");
+            alertBold.textContent = "注意: ";
+            const alertMsg = document.createTextNode("設定の変更を完全に反映するには、ウィンドウのリロード（Reload Window）が必要です。");
+            alertText.appendChild(alertBold);
+            alertText.appendChild(alertMsg);
+
+            alertBox.appendChild(alertIcon);
+            alertBox.appendChild(alertText);
+
+            body.appendChild(sectionSend);
+            body.appendChild(sectionCmds);
+            body.appendChild(sectionKb);
+            body.appendChild(alertBox);
+
+            // フッター
+            const footer = document.createElement("div");
+            footer.style.cssText = "display:flex;align-items:center;justify-content:space-between;padding:12px 18px;border-top:1px solid var(--vscode-widget-border,#333);background:var(--vscode-sideBar-background,#252526);";
+
+            const resetBtn = document.createElement("button");
+            resetBtn.type = "button";
+            resetBtn.textContent = "初期設定に戻す";
+            resetBtn.style.cssText = "background:transparent;border:none;color:var(--vscode-descriptionForeground,#888);font-size:11px;cursor:pointer;text-decoration:underline;padding:4px 0;";
+            resetBtn.onmouseenter = () => resetBtn.style.color = "var(--vscode-foreground,#eee)";
+            resetBtn.onmouseleave = () => resetBtn.style.color = "var(--vscode-descriptionForeground,#888)";
+
+            const rightBtns = document.createElement("div");
+            rightBtns.style.cssText = "display:flex;align-items:center;gap:8px;";
+
+            const cancelBtn = document.createElement("button");
+            cancelBtn.type = "button";
+            cancelBtn.textContent = "キャンセル";
+            cancelBtn.style.cssText = "padding:5px 12px;font-size:11px;border-radius:3px;background:transparent;color:var(--vscode-foreground,#ccc);border:1px solid var(--vscode-widget-border,#555);cursor:pointer;";
+
+            const saveBtn = document.createElement("button");
+            saveBtn.type = "button";
+            saveBtn.textContent = "保存";
+            saveBtn.style.cssText = "padding:5px 14px;font-size:11px;border-radius:3px;background:var(--vscode-button-secondaryBackground,#3a3d41);color:#fff;border:1px solid var(--vscode-widget-border,#555);cursor:pointer;";
+
+            const saveReloadBtn = document.createElement("button");
+            saveReloadBtn.type = "button";
+            saveReloadBtn.textContent = "保存してリロード";
+            saveReloadBtn.style.cssText = "padding:5px 14px;font-size:11px;border-radius:3px;background:var(--vscode-button-background,#0e639c);color:#fff;border:none;cursor:pointer;font-weight:500;";
+
+            rightBtns.appendChild(cancelBtn);
+            rightBtns.appendChild(saveBtn);
+            rightBtns.appendChild(saveReloadBtn);
+            footer.appendChild(resetBtn);
+            footer.appendChild(rightBtns);
+
+            modal.appendChild(header);
+            modal.appendChild(body);
+            modal.appendChild(footer);
+            overlay.appendChild(modal);
+            document.body.appendChild(overlay);
+
+            const cleanup = () => {
+                overlay.remove();
+                focusChatInput();
+            };
+
+            const collectConfig = () => {
+                const nextCfg = {
+                    enterSendDisabled: isEnterSendDisabled,
+                    commands: {}
+                };
+                cmdList.forEach(item => {
+                    const inputs = cmdInputs[item.id];
+                    nextCfg.commands[item.id] = {
+                        primary: cleanCmdName(inputs.primary.value) || DEFAULT_CONFIG.commands[item.id].primary,
+                        short: cleanCmdName(inputs.short.value) || DEFAULT_CONFIG.commands[item.id].short,
+                        label: DEFAULT_CONFIG.commands[item.id].label
+                    };
+                });
+                return nextCfg;
+            };
+
+            closeBtn.onclick = cleanup;
+            cancelBtn.onclick = cleanup;
+
+            resetBtn.onclick = () => {
+                isEnterSendDisabled = DEFAULT_CONFIG.enterSendDisabled;
+                updateToggleUI();
+                cmdList.forEach(item => {
+                    cmdInputs[item.id].primary.value = ":" + DEFAULT_CONFIG.commands[item.id].primary;
+                    cmdInputs[item.id].short.value = ":" + DEFAULT_CONFIG.commands[item.id].short;
+                });
+            };
+
+            saveBtn.onclick = () => {
+                const newCfg = collectConfig();
+                patch.saveConfig(newCfg);
+                cleanup();
+            };
+
+            saveReloadBtn.onclick = () => {
+                const newCfg = collectConfig();
+                patch.saveConfig(newCfg);
+                cleanup();
+                patch.reloadWindow();
+            };
+
+            overlay.onclick = (e) => {
+                if (e.target === overlay) cleanup();
+            };
+
+            window.addEventListener("keydown", function escHandler(e) {
+                if (e.key === "Escape" && document.getElementById("agy-patch-settings-overlay")) {
+                    cleanup();
+                    window.removeEventListener("keydown", escHandler);
+                }
+            });
+        } catch (err) {
+            console.error("showSettingsDialog error:", err);
+            try {
+                alert("設定ダイアログの表示エラー:\n" + String(err));
+            } catch (_e) {}
+        }
+    }
+    patch.showSettingsDialog = showSettingsDialog;
+
+
+    // -------------------------------------------------------------------------
     // 3. セッション操作ショートカットイベントリスナーの登録
     // -------------------------------------------------------------------------
     patch.initSessionHooks = function (deps) {
@@ -188,17 +736,27 @@
         if (!txt.startsWith(":")) return false;
 
         const { rf, ti, Z$, Ot, Dt, fV, O, renameConv, optSummary, notify, getCurTitle, startNewConv, Ut, h4e } = ctx;
+        const cfg = patch.getConfig();
 
-        // :resume / :res
-        if (/^:(resume|res)$/i.test(txt)) {
+        const matchCmd = (cmdKey, allowArgs = false) => {
+            const cmd = cfg.commands[cmdKey];
+            if (!cmd) return false;
+            const parts = [cmd.primary, cmd.short].map(cleanCmdName).filter(Boolean).map(escapeRegExp);
+            if (parts.length === 0) return false;
+            const reg = new RegExp(`^:(${parts.join("|")})${allowArgs ? "(\\s.*)?" : "$"}` , "i");
+            return reg.test(txt);
+        };
+
+        // resume
+        if (matchCmd("resume", false)) {
             Z$(rf); Ot(); Dt([]);
             if (ti) { rf.getRootElement()?.blur(); fV(false); }
             window.dispatchEvent(new CustomEvent("open-session-drawer-focus"));
             return true;
         }
 
-        // :new / :n
-        if (/^:(new|n)$/i.test(txt)) {
+        // new
+        if (matchCmd("new", false)) {
             Z$(rf); Ot(); Dt([]);
             if (ti) { rf.getRootElement()?.blur(); fV(false); }
             startNewConv();
@@ -206,17 +764,15 @@
             return true;
         }
 
-        // :pin / :p または :unpin / :up
-        const isPin = /^:(pin|p)$/i.test(txt);
-        const isUnpin = /^:(unpin|up)$/i.test(txt);
-        if (isPin || isUnpin) {
+        // pin
+        if (matchCmd("pin", false)) {
             Z$(rf); Ot(); Dt([]);
             if (ti) { rf.getRootElement()?.blur(); fV(false); }
             if (O) {
                 try {
-                    optSummary({ type: "updateAnnotations", cascadeId: O, annotations: { pinned: isPin } });
-                    await renameConv(O, Ut(h4e, { pinned: isPin }), true);
-                    notify({ title: isPin ? "セッションをピン留めしました" : "ピン留めを解除しました", autoDismissMs: 3e3 });
+                    optSummary({ type: "updateAnnotations", cascadeId: O, annotations: { pinned: true } });
+                    await renameConv(O, Ut(h4e, { pinned: true }), true);
+                    notify({ title: "セッションをピン留めしました", autoDismissMs: 3e3 });
                 } catch (err) {
                     notify({ title: "ピン留めの変更に失敗しました", message: String(err), autoDismissMs: 5e3 });
                 }
@@ -227,9 +783,31 @@
             return true;
         }
 
-        // :rename / :ren
-        if (/^:(rename|ren)(\s.*)?$/i.test(txt)) {
-            let nextTitle = txt.replace(/^:(rename|ren)\s*/i, "").trim();
+        // unpin
+        if (matchCmd("unpin", false)) {
+            Z$(rf); Ot(); Dt([]);
+            if (ti) { rf.getRootElement()?.blur(); fV(false); }
+            if (O) {
+                try {
+                    optSummary({ type: "updateAnnotations", cascadeId: O, annotations: { pinned: false } });
+                    await renameConv(O, Ut(h4e, { pinned: false }), true);
+                    notify({ title: "ピン留めを解除しました", autoDismissMs: 3e3 });
+                } catch (err) {
+                    notify({ title: "ピン留めの変更に失敗しました", message: String(err), autoDismissMs: 5e3 });
+                }
+            } else {
+                notify({ title: "有効なセッションが見つかりません", autoDismissMs: 3e3 });
+            }
+            focusChatInput();
+            return true;
+        }
+
+        // rename
+        if (matchCmd("rename", true)) {
+            const cmd = cfg.commands.rename;
+            const parts = [cmd.primary, cmd.short].map(cleanCmdName).filter(Boolean).map(escapeRegExp);
+            const stripReg = new RegExp(`^:(${parts.join("|")})\\s*`, "i");
+            let nextTitle = txt.replace(stripReg, "").trim();
             if (!nextTitle) {
                 try {
                     nextTitle = await showPromptDialog("新しいセッション名を入力してください:", getCurTitle());
@@ -269,6 +847,13 @@
         const { We, yt, Re, mt, Of, nl, wC, bra, co, Cqo, HTn, Wa, Lmt, Ut, h4e, E, $e, yi } = deps;
 
         return function __SessionDrawer() {
+            try {
+                const wb = Of();
+                if (wb && wb._commandService) {
+                    patch._commandService = wb._commandService;
+                }
+            } catch (_e) {}
+
             const [isOpen, setIsOpen] = We(false);
             const [filterText, setFilterText] = We("");
             const [curIdx, setCurIdx] = We(0);
@@ -545,10 +1130,13 @@
                                     E("button", {
                                         type: "button",
                                         className: "flex items-center gap-1 px-1.5 py-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors text-[11px] cursor-pointer",
-                                        title: "ダイアログで表示",
-                                        onClick: () => showPastConversationsPicker(),
+                                        title: "チャットペインパッチ設定",
+                                        onClick: (ev) => {
+                                            ev?.stopPropagation();
+                                            patch.showSettingsDialog();
+                                        },
                                         children: [
-                                            E($e, { name: "open_in_new", size: 13 })
+                                            E($e, { name: "settings", size: 13 })
                                         ]
                                     })
                                 ]

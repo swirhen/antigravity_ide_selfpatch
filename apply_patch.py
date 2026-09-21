@@ -114,18 +114,32 @@ def main():
         print("  [OK] 独立モジュールを先頭にバンドル注入しました (Sandbox/CSP完全準拠)")
 
     # 3-2. ショートカットコマンド登録
+    sn_clean = 'sn.registerCommand("noop",()=>{});["openDrawer","rename","pin","unpin","new"].forEach(c=>{sn.registerCommand("antigravity.session."+c,()=>window.dispatchEvent(new CustomEvent(c==="openDrawer"?"open-session-drawer-focus":"action-session-"+c)))});sn.registerCommand("antigravity.session.openKeybindings",(i,...n)=>{try{i.get(bi).executeCommand("workbench.action.openGlobalKeybindingsFile")}catch(_e){}});'
     sn_target = 'sn.registerCommand("noop",()=>{});'
-    sn_repl = 'sn.registerCommand("noop",()=>{});["openDrawer","rename","pin","unpin","new"].forEach(c=>{sn.registerCommand("antigravity.session."+c,()=>window.dispatchEvent(new CustomEvent(c==="openDrawer"?"open-session-drawer-focus":"action-session-"+c)))});'
-    if sn_target in content and 'antigravity.session.openDrawer' not in content:
-        content = content.replace(sn_target, sn_repl, 1)
+    pat = r'sn\.registerCommand\("noop",\(\)=>{}\);(?:(?:\["openDrawer"[^;]+;|window\.addEventListener\("action-session-openKeybindings"[^;]+;|sn\.registerCommand\("antigravity\.session\.openKeybindings"[^;]+;)\s*)+'
+
+    import re
+    if re.search(pat, content):
+        content = re.sub(pat, sn_clean, content, count=1)
+        print("  [OK] [Commands] session.* コマンドディスパッチャーを最新版に更新しました")
+    elif sn_target in content:
+        content = content.replace(sn_target, sn_clean, 1)
         print("  [OK] [Commands] session.* コマンドディスパッチャーを登録しました")
 
-    # 3-3. 改行＆コロンコマンド即時実行
-    nl_target = 'registerCommand(xSn,a=>{a.preventDefault();let l=a.ctrlKey||a.metaKey;return!l?!1:(t(a,n),!0)},gD)'
-    nl_repl = 'registerCommand(xSn,a=>{a.preventDefault();let _k="";try{_k=n.getEditorState().read(()=>f1().getTextContent()).trim()}catch(_e){}let _isCmd=/^:(resume|res|pin|p|unpin|up|rename|ren|new|n)(\\s.*)?$/i.test(_k);let l=a.ctrlKey||a.metaKey||_isCmd;return!l?!1:(t(a,n),!0)},gD)'
-    if nl_target in content:
-        content = content.replace(nl_target, nl_repl, 1)
-        print("  [OK] [Newline] Enter改行 / Ctrl+Enter送信 / コロンコマンド即時実行を適用しました")
+    # 3-3. 改行＆送信判定（モジュール委譲版）
+    nl_new = 'registerCommand(xSn,a=>{a.preventDefault();let _k="";try{_k=n.getEditorState().read(()=>f1().getTextContent()).trim()}catch(_e){}let _send=window.__AGY_SESSION_PATCH__?window.__AGY_SESSION_PATCH__.shouldSendMessage(a,_k):(a.ctrlKey||a.metaKey);return!_send?!1:(t(a,n),!0)},gD)'
+    nl_orig = 'registerCommand(xSn,a=>{a.preventDefault();let l=a.ctrlKey||a.metaKey;return!l?!1:(t(a,n),!0)},gD)'
+    nl_old_pattern = r'registerCommand\(xSn,a=>{a\.preventDefault\(\);let _k="".*?return!l\?!1:\(t\(a,n\),!0\)},gD\)'
+
+    if nl_orig in content:
+        content = content.replace(nl_orig, nl_new, 1)
+        print("  [OK] [Newline] 改行・送信判定をモジュール委譲版に適用しました")
+    elif 'shouldSendMessage(a,_k)' not in content:
+        import re
+        content = re.sub(nl_old_pattern, nl_new, content, count=1)
+        print("  [OK] [Newline] 改行・送信判定を最新のモジュール委譲版に更新しました")
+    else:
+        print("  [INFO] [Newline] 改行・送信判定はすでに最新です")
 
     # 3-4. セッションフック＆リスナー (モジュール委譲版)
     hooks_target = '{deleteAgentMessage:pt}=Wa()'
