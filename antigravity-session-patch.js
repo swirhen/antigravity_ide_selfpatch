@@ -122,21 +122,6 @@
 
     // サービス参照保持
     patch._commandService = null;
-    patch._keybindingService = null;
-
-    patch.getRenameTooltip = function () {
-        let keyLabel = "";
-        try {
-            if (patch._keybindingService && typeof patch._keybindingService.lookupKeybinding === "function") {
-                const kb = patch._keybindingService.lookupKeybinding("antigravity.session.rename");
-                if (kb && typeof kb.getLabel === "function") {
-                    keyLabel = kb.getLabel() || "";
-                }
-            }
-        } catch (_e) {}
-        if (!keyLabel) keyLabel = "F2";
-        return keyLabel ? `クリックしてセッション名を変更 (${keyLabel})` : "クリックしてセッション名を変更";
-    };
 
     patch.openKeybindings = function () {
         try {
@@ -768,25 +753,11 @@
             }
         };
 
-        // ヘッダーセッションタイトルのホバー時にツールチップを動的更新
-        const onHeaderTitleHover = (e) => {
-            const target = e.target;
-            if (!target) return;
-            const titleEl = target.closest(".overflow-hidden.text-ellipsis.whitespace-nowrap");
-            if (titleEl && !titleEl.closest("#session-drawer-container") && !titleEl.closest("#agy-patch-settings-overlay")) {
-                const headerEl = titleEl.closest(".flex.items-center.justify-between");
-                if (headerEl && headerEl.querySelector('[data-tooltip-id="new-conversation-tooltip"]')) {
-                    titleEl.title = patch.getRenameTooltip();
-                }
-            }
-        };
-
         window.addEventListener("action-session-rename", onRename);
         window.addEventListener("action-session-pin", onPin);
         window.addEventListener("action-session-unpin", onUnpin);
         window.addEventListener("action-session-new", onNew);
         document.addEventListener("click", onHeaderTitleClick, true);
-        document.addEventListener("mouseenter", onHeaderTitleHover, true);
 
         return () => {
             window.removeEventListener("action-session-rename", onRename);
@@ -794,7 +765,6 @@
             window.removeEventListener("action-session-unpin", onUnpin);
             window.removeEventListener("action-session-new", onNew);
             document.removeEventListener("click", onHeaderTitleClick, true);
-            document.removeEventListener("mouseenter", onHeaderTitleHover, true);
         };
     };
 

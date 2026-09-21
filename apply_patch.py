@@ -114,7 +114,7 @@ def main():
         print("  [OK] 独立モジュールを先頭にバンドル注入しました (Sandbox/CSP完全準拠)")
 
     # 3-2. ショートカットコマンド登録
-    sn_clean = 'sn.registerCommand("noop",()=>{});["openDrawer","rename","pin","unpin","new"].forEach(c=>{sn.registerCommand("antigravity.session."+c,(i)=>{try{if(window.__AGY_SESSION_PATCH__&&!window.__AGY_SESSION_PATCH__._keybindingService&&typeof Cn!=="undefined")window.__AGY_SESSION_PATCH__._keybindingService=i.get(Cn)}catch(_e){}window.dispatchEvent(new CustomEvent(c==="openDrawer"?"open-session-drawer-focus":"action-session-"+c))})});sn.registerCommand("antigravity.session.openKeybindings",(i,...n)=>{try{i.get(bi).executeCommand("workbench.action.openGlobalKeybindingsFile")}catch(_e){}});'
+    sn_clean = 'sn.registerCommand("noop",()=>{});["openDrawer","rename","pin","unpin","new"].forEach(c=>{sn.registerCommand("antigravity.session."+c,()=>window.dispatchEvent(new CustomEvent(c==="openDrawer"?"open-session-drawer-focus":"action-session-"+c)))});sn.registerCommand("antigravity.session.openKeybindings",(i,...n)=>{try{i.get(bi).executeCommand("workbench.action.openGlobalKeybindingsFile")}catch(_e){}});'
     sn_target = 'sn.registerCommand("noop",()=>{});'
     pat = r'sn\.registerCommand\("noop",\(\)=>{}\);(?:(?:\["openDrawer"[^;]+;|window\.addEventListener\("action-session-openKeybindings"[^;]+;|sn\.registerCommand\("antigravity\.session\.openKeybindings"[^;]+;)\s*)+'
 
@@ -167,13 +167,13 @@ def main():
         content = content.replace(mount_target, mount_repl, 1)
         print("  [OK] [Mount] CJu コンポーネントへマウントしました")
 
-    # 3-7. ヘッダーのセッションタイトルクリックで名前変更（動的ツールチップ連動）
-    header_title_new = 'E("div",{className:"flex min-w-0 items-center overflow-hidden text-ellipsis whitespace-nowrap gap-1 cursor-pointer hover:underline hover:opacity-80 transition-all",title:window.__AGY_SESSION_PATCH__?window.__AGY_SESSION_PATCH__.getRenameTooltip():"クリックしてセッション名を変更",onClick:()=>window.dispatchEvent(new CustomEvent("action-session-rename")),children:u?`${T} > ${F}`:F})'
+    # 3-7. ヘッダーのセッションタイトルクリックで名前変更
+    header_title_new = 'E("div",{className:"flex min-w-0 items-center overflow-hidden text-ellipsis whitespace-nowrap gap-1 cursor-pointer hover:underline hover:opacity-80 transition-all",title:"クリックしてセッション名を変更",onClick:()=>window.dispatchEvent(new CustomEvent("action-session-rename")),children:u?`${T} > ${F}`:F})'
     header_pattern = r'E\("div",\{className:"flex min-w-0 items-center overflow-hidden text-ellipsis whitespace-nowrap gap-1[^"]*",[^}]*children:u\?`\$\{T\} > \$\{F\}`:F\}\)'
     if re.search(header_pattern, content):
         content = re.sub(header_pattern, header_title_new, content, count=1)
-        print("  [OK] [HeaderTitle] ヘッダーのセッションタイトルクリック（設定連動版）を適用しました")
-    elif 'getRenameTooltip()' in content:
+        print("  [OK] [HeaderTitle] ヘッダーのセッションタイトルクリックを適用しました")
+    elif 'クリックしてセッション名を変更' in content:
         print("  [INFO] [HeaderTitle] ヘッダーのセッションタイトルクリックはすでに最新です")
 
     # 構文チェック
