@@ -31,18 +31,19 @@ jobs:
           fi
 
       - name: Package Release ZIP
+        id: package_zip
         run: |
           VERSION="${{ steps.get_version.outputs.VERSION }}"
           ZIP_NAME="antigravity_ide_selfpatch_${VERSION}.zip"
           zip -j "$ZIP_NAME" apply_patch.py antigravity-session-patch.js README.md
-          echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
+          echo "zip_name=$ZIP_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.get_version.outputs.VERSION }}
           name: Antigravity IDE Enhanced Patch ${{ steps.get_version.outputs.VERSION }}
-          files: ${{ env.ZIP_NAME }}
+          files: ${{ steps.package_zip.outputs.zip_name }}
           body: |
             ## Antigravity IDE Enhanced Chat & Session Patch ${{ steps.get_version.outputs.VERSION }}
 
@@ -52,7 +53,7 @@ jobs:
             - `README.md`: 使い方・ショートカット一覧・ロールバック手順
 
             ### 🚀 インストール手順
-            1. 下記のアセットから `${{ env.ZIP_NAME }}` をダウンロードして解凍します。
+            1. 下記のアセットから `${{ steps.package_zip.outputs.zip_name }}` をダウンロードして解凍します。
             2. 解凍したフォルダでターミナルを開き、以下を実行します：
                ```bash
                python apply_patch.py
