@@ -75,7 +75,7 @@ def main():
         module_code = f.read().strip()
     print(f"  [OK] モジュール読み込み完了 ({len(module_code)} bytes)")
 
-    # 2. 本体の初期バックアップ
+    # 2. 本体の初期バックアップ & 直前バックアップ
     print(f"\n[2/5] 本体のバックアップ作成中...")
     bak_path = js_path + ".backup_before_patch"
     if not os.path.exists(bak_path):
@@ -83,6 +83,11 @@ def main():
         print(f"  [OK] 初期バックアップを保存しました: {bak_path}")
     else:
         print(f"  [INFO] 既存の初期バックアップが存在するため保持します: {bak_path}")
+
+    # 直前バックアップ (いつでも直前に戻せるよう保存)
+    pre_bak = js_path + ".pre_patch_backup"
+    shutil.copy2(js_path, pre_bak)
+    print(f"  [OK] パッチ適用前の直前バックアップを保存しました: {os.path.basename(pre_bak)}")
 
     # 3. 本体のフック適用
     print(f"\n[3/5] workbench.desktop.main.js へのパッチ適用中...")
@@ -96,6 +101,17 @@ def main():
         if end_idx != -1:
             content = content[end_idx + 2:]
             print("  [OK] 旧方式の動的ローダーコードをクリーンアップしました")
+
+    # 旧バージョンの nfa パッチがあれば復元
+    old_nfa_patched = '!(r?.hideInSubagentConversation===!0&&V?.metadata?.parentConversationId)&&E(Ii,{children:[E("div",{className:"flex items-center justify-end px-1 pb-1"},E(__VitalsBadge,{})),E(nfa,{})]})'
+    orig_nfa = '!(r?.hideInSubagentConversation===!0&&V?.metadata?.parentConversationId)&&E(nfa,{})'
+    if old_nfa_patched in content:
+        content = content.replace(old_nfa_patched, orig_nfa, 1)
+        print("  [OK] 旧 nfa パッチを元に戻しました")
+    old_badge_def = '__VitalsBadge=window.__AGY_SESSION_PATCH__?window.__AGY_SESSION_PATCH__.createVitalsBadge({We,yt,me,E,$e,yi}):(()=>null),'
+    if old_badge_def in content:
+        content = content.replace(old_badge_def, '', 1)
+        print("  [OK] 旧 __VitalsBadge 定義を削除しました")
 
     # 3-1. 独立モジュールを先頭に安全にバンドル注入
     bundle_marker = "/* --- ANTIGRAVITY SESSION PATCH MODULE START --- */"
@@ -154,18 +170,52 @@ def main():
         content = content.replace(pn_target, pn_repl, 1)
         print("  [OK] [ColonCommands] コロンコマンドハンドラをモジュールへ委譲しました")
 
-    # 3-6. ドロワー定義＆マウント
+    # 3-6. ドロワー＆Vitalsバー定義＆マウント
+    # 3-6-a. __SessionDrawer 定義（CJu直前）
     cju_target = 'CJu=({includeHeader:t})=>'
     drawer_repl = r'''__SessionDrawer=window.__AGY_SESSION_PATCH__?window.__AGY_SESSION_PATCH__.createSessionDrawer({We,yt,Re,mt,Of,nl,wC,bra,co,Cqo,HTn,Wa,Lmt,Ut,h4e,E,$e,yi}):(()=>null),'''
-    if cju_target in content and '__SessionDrawer' not in content:
+    old_dual_def = r'''__SessionDrawer=window.__AGY_SESSION_PATCH__?window.__AGY_SESSION_PATCH__.createSessionDrawer({We,yt,Re,mt,Of,nl,wC,bra,co,Cqo,HTn,Wa,Lmt,Ut,h4e,E,$e,yi}):(()=>null),__VitalsBar=window.__AGY_SESSION_PATCH__?window.__AGY_SESSION_PATCH__.createVitalsBar({We,yt,Re,mt,Of,nl,wC,bra,co,Cqo,HTn,Wa,Lmt,Ut,h4e,E,$e,yi}):(()=>null),'''
+    if old_dual_def in content:
+        content = content.replace(old_dual_def, drawer_repl, 1)
+        print("  [OK] [Drawer] CJu直前の __VitalsBar 重複定義をクリーンアップしました")
+    elif cju_target in content and '__SessionDrawer=' not in content:
         content = content.replace(cju_target, drawer_repl + cju_target, 1)
-        print("  [OK] [Drawer] __SessionDrawer 1行定義を注入しました")
+        print("  [OK] [Drawer] __SessionDrawer 定義を注入しました")
 
-    mount_target = 'children:[t&&E(hHu,{}),E(rHu,{})'
-    mount_repl = 'children:[t&&E(hHu,{}),E(__SessionDrawer,{}),E(rHu,{})'
-    if mount_target in content:
-        content = content.replace(mount_target, mount_repl, 1)
-        print("  [OK] [Mount] CJu コンポーネントへマウントしました")
+    # CJu ヘッダー直下のマウントから __VitalsBar を除外し、セッションドロワーのみに戻す
+    mount_top_vitals = 'children:[t&&E(hHu,{}),E(__VitalsBar,{}),E(__SessionDrawer,{}),E(rHu,{})'
+    mount_top_drawer = 'children:[t&&E(hHu,{}),E(__SessionDrawer,{}),E(rHu,{})'
+    if mount_top_vitals in content:
+        content = content.replace(mount_top_vitals, mount_top_drawer, 1)
+        print("  [OK] [Mount] 上部ヘッダー直下から __VitalsBar を除去しました（セッション一覧を上部へ復元）")
+
+    # 3-6-b. __VitalsBar 定義（oJu直前）
+    oju_target = 'oJu=()=>{'
+    vitals_def = r'''__VitalsBar=window.__AGY_SESSION_PATCH__?window.__AGY_SESSION_PATCH__.createVitalsBar({We,yt,me,E,yi}):(()=>null),'''
+    if '__VitalsBar=' not in content:
+        if oju_target in content:
+            content = content.replace(oju_target, vitals_def + oju_target, 1)
+            print("  [OK] [VitalsBar] __VitalsBar 定義を oJu 直前に注入しました")
+    else:
+        print("  [INFO] [VitalsBar] __VitalsBar はすでに定義されています")
+
+    # 3-6-c. チャット入力欄 (nfa) から __VitalsBar を解除（もし入っていれば元に戻す）
+    nfa_patched = 'children:!(r?.hideInSubagentConversation===!0&&V?.metadata?.parentConversationId)&&E(Ii,{children:[E(__VitalsBar,{}),E(nfa,{})]})'
+    nfa_orig = 'children:!(r?.hideInSubagentConversation===!0&&V?.metadata?.parentConversationId)&&E(nfa,{})'
+    if nfa_patched in content:
+        content = content.replace(nfa_patched, nfa_orig, 1)
+        print("  [OK] [Mount] チャット入力欄(nfa)直上から __VitalsBar を解除しました")
+
+    # 3-6-d. Review changes 等が表示されるバー (ifa) の直上に __VitalsBar をマウント
+    ifa_orig = 'lt?E("div",{className:"px-2",children:E(ifa,{})}):'
+    ifa_patched = 'lt?E("div",{className:"px-2",children:[E(__VitalsBar,{}),E(ifa,{})]}):'
+    if ifa_orig in content:
+        content = content.replace(ifa_orig, ifa_patched, 1)
+        print("  [OK] [Mount] Review changesバー(ifa)の直上に __VitalsBar をマウントしました")
+    elif ifa_patched in content:
+        print("  [INFO] [Mount] Review changesバー(ifa)直上の __VitalsBar はすでに最新です")
+    else:
+        print("  [WARN] [Mount] ifa のターゲット箇所が見つかりませんでした")
 
     # 3-7. ヘッダーのセッションタイトルクリックで名前変更
     header_title_new = 'E("div",{className:"flex min-w-0 items-center overflow-hidden text-ellipsis whitespace-nowrap gap-1 cursor-pointer hover:underline hover:opacity-80 transition-all",title:"クリックしてセッション名を変更",onClick:()=>window.dispatchEvent(new CustomEvent("action-session-rename")),children:u?`${T} > ${F}`:F})'
@@ -176,6 +226,15 @@ def main():
     elif 'クリックしてセッション名を変更' in content:
         print("  [INFO] [HeaderTitle] ヘッダーのセッションタイトルクリックはすでに最新です")
 
+    # 3-8. pea LanguageServer クライアント生成フック（クォータ・利用状況取得用）
+    pea_orig = 'pea=class{constructor(t,e,i){this.port=t,this.csrfToken=e,this.options=i}_lsClient;'
+    pea_patched = 'pea=class{constructor(t,e,i){this.port=t,this.csrfToken=e,this.options=i;try{window.__AGY_SESSION_PATCH__?.setLanguageServerInfo(t,e)}catch(_e){}}_lsClient;'
+    if pea_orig in content:
+        content = content.replace(pea_orig, pea_patched, 1)
+        print("  [OK] [LanguageServer] pea コンストラクタへポート&トークン取得フックを適用しました")
+    elif 'setLanguageServerInfo(t,e)' in content:
+        print("  [INFO] [LanguageServer] pea コンストラクタフックはすでに最新です")
+
     # 構文チェック
     temp_file = js_path + ".temp_check.js"
     with open(temp_file, "w", encoding="utf-8") as f:
@@ -183,10 +242,16 @@ def main():
 
     print("\n[4/5] node --check による構文検証中...")
     try:
-        subprocess.run(["node", "--check", temp_file], check=True, capture_output=True, text=True)
+        subprocess.run(["node", "--check", temp_file], check=True, capture_output=True, text=True, encoding="utf-8", errors="replace")
         print("  [OK] 構文チェック PASSED!")
-    except Exception as err:
+    except subprocess.CalledProcessError as err:
         print(f"[ERROR] 構文チェックエラー: {err}")
+        print(f"[STDERR]:\n{err.stderr}")
+        if os.path.exists(temp_file):
+            os.remove(temp_file)
+        sys.exit(1)
+    except Exception as err:
+        print(f"[ERROR] エラー: {err}")
         if os.path.exists(temp_file):
             os.remove(temp_file)
         sys.exit(1)

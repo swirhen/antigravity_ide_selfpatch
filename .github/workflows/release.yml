@@ -35,7 +35,7 @@ jobs:
         run: |
           VERSION="${{ steps.get_version.outputs.VERSION }}"
           ZIP_NAME="antigravity_ide_selfpatch_${VERSION}.zip"
-          zip -j "$ZIP_NAME" apply_patch.py antigravity-session-patch.js README.md
+          zip -j "$ZIP_NAME" apply_patch.py rollback.py antigravity-session-patch.js README.md
           echo "zip_name=$ZIP_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
@@ -44,18 +44,4 @@ jobs:
           tag_name: ${{ steps.get_version.outputs.VERSION }}
           name: Antigravity IDE Enhanced Patch ${{ steps.get_version.outputs.VERSION }}
           files: ${{ steps.package_zip.outputs.zip_name }}
-          body: |
-            ## Antigravity IDE Enhanced Chat & Session Patch ${{ steps.get_version.outputs.VERSION }}
-
-            ### 📦 同梱内容
-            - `apply_patch.py`: 自動インストーラー（Windows / macOS / Linux 対応）
-            - `antigravity-session-patch.js`: 独立モジュール原本
-            - `README.md`: 使い方・ショートカット一覧・ロールバック手順
-
-            ### 🚀 インストール手順
-            1. 下記のアセットから `${{ steps.package_zip.outputs.zip_name }}` をダウンロードして解凍します。
-            2. 解凍したフォルダでターミナルを開き、以下を実行します：
-               ```bash
-               python apply_patch.py
-               ```
-            3. Antigravity IDE で `Ctrl + Shift + P` -> `Developer: Reload Window` を実行します。
+          body_path: Release.md

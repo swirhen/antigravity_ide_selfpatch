@@ -1,4 +1,4 @@
-/**
+/*
  * Antigravity IDE - セッション一覧・名前変更・改行パッチ 独立モジュール
  * File: antigravity-session-patch.js
  */
@@ -1312,6 +1312,537 @@
                     })
                 ]
             });
+        };
+    };
+
+    // -------------------------------------------------------------------------
+    // 6. AI 利用状況・クォータ残量バッジ (Vitals Module)
+    // -------------------------------------------------------------------------
+    patch._lsPort = null;
+    patch._lsToken = null;
+    patch._lsLastFetchTime = 0;
+    patch._lsQuotaCache = null;
+    patch._lsFetchPromise = null;
+    patch._vitalsListeners = new Set();
+
+    patch.setLanguageServerInfo = function (port, token) {
+        if (!port || !token) return;
+        const changed = patch._lsPort !== port || patch._lsToken !== token;
+        patch._lsPort = port;
+        patch._lsToken = token;
+        if (changed) {
+            patch.fetchQuotaSummary(true);
+        }
+    };
+
+    patch.onVitalsChange = function (listener) {
+        patch._vitalsListeners.add(listener);
+        return () => patch._vitalsListeners.delete(listener);
+    };
+
+    patch._notifyVitalsChange = function () {
+        for (const fn of patch._vitalsListeners) {
+            try { fn(patch._lsQuotaCache); } catch (_e) {}
+        }
+    };
+
+    // サービス稼働ステータス取得 (Google & Claude)
+    patch._statusCache = { gemini: "正常", claude: "正常", lastCheck: 0 };
+    patch.fetchServiceStatuses = async function (force = false) {
+        const now = Date.now();
+        if (!force && (now - patch._statusCache.lastCheck < 180000)) {
+            return patch._statusCache;
+        }
+        patch._statusCache.lastCheck = now;
+        try {
+            // Google Cloud / Gemini
+            fetch("https://status.cloud.google.com/incidents.json")
+                .then(r => r.json())
+                .then(incs => {
+                    if (Array.isArray(incs)) {
+                        const active = incs.filter(i => !i.end);
+                        let isBad = false;
+                        for (const inc of active) {
+                            const desc = `${inc.service_name || ""} ${inc.external_desc || ""}`.toLowerCase();
+                            if (/gemini|vertex|generative|ai platform|language/.test(desc)) {
+                                isBad = true;
+                                break;
+                            }
+                        }
+                        patch._statusCache.gemini = isBad ? "異常" : "正常";
+                    }
+                })
+                .catch(() => {});
+
+            // Claude / Anthropic
+            fetch("https://status.claude.com/api/v2/summary.json")
+                .then(r => r.json())
+                .then(data => {
+                    const indicator = data?.status?.indicator;
+                    patch._statusCache.claude = (indicator && indicator !== "none") ? "異常" : "正常";
+                })
+                .catch(() => {});
+        } catch (_e) {}
+        return patch._statusCache;
+    };
+
+    // リセット日時のフォーマット: YY/MM/DD HH:MM (Dd HH:MM) または (HH:MM)
+    function formatResetDetails(dateStr, isWeekly = false) {
+        if (!dateStr) return { absStr: "--/--/-- --:--", relStr: "--:--" };
+        try {
+            const d = new Date(dateStr);
+            const now = new Date();
+            const yy = String(d.getFullYear()).slice(-2);
+            const mm = String(d.getMonth() + 1).padStart(2, "0");
+            const dd = String(d.getDate()).padStart(2, "0");
+            const hh = String(d.getHours()).padStart(2, "0");
+            const mi = String(d.getMinutes()).padStart(2, "0");
+            const absStr = `${yy}/${mm}/${dd} ${hh}:${mi}`;
+
+            const diffMs = d.getTime() - now.getTime();
+            if (diffMs <= 0) {
+                return { absStr, relStr: isWeekly ? "0d 00:00" : "00:00" };
+            }
+            const totalMin = Math.floor(diffMs / 60000);
+            const days = Math.floor(totalMin / 1440);
+            const remMin = totalMin % 1440;
+            const hours = Math.floor(remMin / 60);
+            const mins = remMin % 60;
+
+            const timeStr = `${String(hours).padStart(2, "0")}:${String(mins).padStart(2, "0")}`;
+            const relStr = isWeekly ? `${days}d ${timeStr}` : timeStr;
+            return { absStr, relStr };
+        } catch (_e) {
+            return { absStr: "--/--/-- --:--", relStr: "--:--" };
+        }
+    }
+
+    // 参考元 (ai-vitals) の週枠ペース判定ロジック
+    // windowMinutes = 7日(10080分)。残り時間と消費率(100 - 残量%)の差分で判定
+    function calcPaceStatus(remainingPercent, dateStr) {
+        if (remainingPercent === null || remainingPercent === undefined || !dateStr) return null;
+        try {
+            const resetsAtSec = new Date(dateStr).getTime() / 1000;
+            const nowSec = Date.now() / 1000;
+            const totalSec = 10080 * 60; // 7日間
+            const remSec = Math.max(0, resetsAtSec - nowSec);
+            const elapsedSec = Math.max(0, totalSec - remSec);
+            if (elapsedSec < 1800) return "適正ペース"; // 最初の30分は十分なデータなし
+            const usedPercent = 100 - remainingPercent;
+            const timePct = (elapsedSec / totalSec) * 100;
+            const diff = usedPercent - timePct;
+            if (diff > 15) return "ハイペース注意";
+            if (diff < -10) return "安全ペース";
+            return "適正ペース";
+        } catch (_e) {
+            return "適正ペース";
+        }
+    }
+
+    patch.fetchQuotaSummary = async function (force = false) {
+        if (!patch._lsPort || !patch._lsToken) {
+            return patch._lsQuotaCache;
+        }
+        const now = Date.now();
+        if (!force && patch._lsQuotaCache && (now - patch._lsLastFetchTime < 60000)) {
+            return patch._lsQuotaCache;
+        }
+        if (patch._lsFetchPromise) {
+            return patch._lsFetchPromise;
+        }
+
+        patch._lsFetchPromise = (async () => {
+            try {
+                // 通常 port+1 が HTTP 平文ポート、port が HTTPS。両方を試行
+                const portsToTry = [patch._lsPort + 1, patch._lsPort];
+                let json = null;
+
+                for (const p of portsToTry) {
+                    for (const proto of ["http", "https"]) {
+                        try {
+                            const url = `${proto}://127.0.0.1:${p}/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary`;
+                            const resp = await fetch(url, {
+                                method: "POST",
+                                headers: {
+                                    "Content-Type": "application/json",
+                                    "Connect-Protocol-Version": "1",
+                                    "X-Codeium-Csrf-Token": patch._lsToken
+                                },
+                                body: JSON.stringify({
+                                    metadata: { ideName: "antigravity", extensionName: "antigravity", locale: "ja" }
+                                })
+                            });
+                            if (resp.ok) {
+                                json = await resp.json();
+                                if (json?.response?.groups) break;
+                            }
+                        } catch (_err) {}
+                    }
+                    if (json?.response?.groups) break;
+                }
+
+                if (!json?.response?.groups) {
+                    return patch._lsQuotaCache;
+                }
+
+                const groups = json.response.groups;
+                let gemini5h = null, geminiWeekly = null;
+                let claude5h = null, claudeWeekly = null;
+
+                for (const g of groups) {
+                    const disp = (g.displayName || "").toLowerCase();
+                    const buckets = g.buckets || [];
+                    const isGemini = disp.includes("gemini");
+                    const isClaude = disp.includes("claude") || disp.includes("gpt") || disp.includes("3p");
+
+                    for (const b of buckets) {
+                        const frac = b.remainingFraction !== undefined ? b.remainingFraction : 1.0;
+                        const pct = Math.round(frac * 100);
+                        const resetStr = b.resetTime || "";
+                        const item = {
+                            bucketId: b.bucketId,
+                            displayName: b.displayName,
+                            fraction: frac,
+                            percent: pct,
+                            resetTime: resetStr
+                        };
+                        if (isGemini) {
+                            if (b.window === "5h") gemini5h = item;
+                            else if (b.window === "weekly") geminiWeekly = item;
+                        } else if (isClaude) {
+                            if (b.window === "5h") claude5h = item;
+                            else if (b.window === "weekly") claudeWeekly = item;
+                        }
+                    }
+                }
+
+                patch._lsQuotaCache = {
+                    fetchedAt: Date.now(),
+                    gemini: { h5: gemini5h, weekly: geminiWeekly },
+                    claude: { h5: claude5h, weekly: claudeWeekly }
+                };
+                patch._lsLastFetchTime = Date.now();
+                patch._notifyVitalsChange();
+                return patch._lsQuotaCache;
+            } catch (err) {
+                console.warn("[AGY Patch] Quota fetch error:", err);
+                return patch._lsQuotaCache;
+            } finally {
+                patch._lsFetchPromise = null;
+            }
+        })();
+
+        return patch._lsFetchPromise;
+    };
+
+    // VitalsBar React コンポーネント生成（ドロワー一覧と同様の確実な独立バー方式）
+    patch.createVitalsBar = function (deps) {
+        const { We, yt, me, E, yi } = deps;
+
+        return function VitalsBar() {
+            try {
+                const [quota, setQuota] = We(() => patch._lsQuotaCache);
+                const [statusInfo, setStatusInfo] = We(() => patch._statusCache);
+                const [isHovered, setIsHovered] = We(false);
+                const [isRefreshing, setIsRefreshing] = We(false);
+
+                // 初回マウント時 & 変更購読
+                yt(() => {
+                    const unsubscribe = patch.onVitalsChange((data) => {
+                        setQuota(data);
+                    });
+                    if (!patch._lsQuotaCache) {
+                        patch.fetchQuotaSummary();
+                    }
+                    patch.fetchServiceStatuses().then(s => setStatusInfo({ ...s }));
+
+                    // 60秒ごとにクォータ自動更新、180秒ごとにステータス確認
+                    const timer = setInterval(() => {
+                        patch.fetchQuotaSummary();
+                        patch.fetchServiceStatuses().then(s => setStatusInfo({ ...s }));
+                    }, 60000);
+                    return () => {
+                        unsubscribe();
+                        clearInterval(timer);
+                    };
+                }, []);
+
+                const handleClick = (e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    setIsRefreshing(true);
+                    Promise.all([
+                        patch.fetchQuotaSummary(true),
+                        patch.fetchServiceStatuses(true)
+                    ]).finally(() => {
+                        setStatusInfo({ ...patch._statusCache });
+                        setTimeout(() => setIsRefreshing(false), 400);
+                    });
+                };
+
+                const gItem = quota?.gemini?.weekly || quota?.gemini?.h5;
+                const cItem = quota?.claude?.weekly || quota?.claude?.h5;
+
+                const gPct = gItem ? gItem.percent : null;
+                const cPct = cItem ? cItem.percent : null;
+
+                // 残量カラー: 10%を下回ったら赤 (< 10)
+                const getColorClass = (pct) => {
+                    if (pct === null || pct === undefined) return "text-muted-foreground";
+                    if (pct < 10) return "text-red-400 font-semibold";
+                    if (pct <= 25) return "text-amber-400 font-medium";
+                    return "text-emerald-400/90";
+                };
+
+                const getColorStyle = (pct) => {
+                    if (pct === null || pct === undefined) return { color: "#94a3b8" };
+                    if (pct < 10) return { color: "#f87171", fontWeight: "600" };
+                    if (pct <= 25) return { color: "#fbbf24", fontWeight: "500" };
+                    return { color: "#34d399" };
+                };
+
+                // ペースバッジカラー (インラインスタイルで確実に反映)
+                const getPaceStyle = (pace) => {
+                    if (pace === "ハイペース注意") return { color: "#f87171", fontWeight: "500" }; // 赤
+                    if (pace === "安全ペース") return { color: "#22d3ee", fontWeight: "500" };     // シアン
+                    return { color: "#34d399", fontWeight: "500" };                                 // 緑 (適正ペース)
+                };
+
+                const hasData = gPct !== null || cPct !== null;
+
+                // 各種詳細データの計算
+                const gemini5hReset = formatResetDetails(quota?.gemini?.h5?.resetTime, false);
+                const geminiWeeklyReset = formatResetDetails(quota?.gemini?.weekly?.resetTime, true);
+                const geminiWeeklyPace = calcPaceStatus(quota?.gemini?.weekly?.percent, quota?.gemini?.weekly?.resetTime);
+
+                const claude5hReset = formatResetDetails(quota?.claude?.h5?.resetTime, false);
+                const claudeWeeklyReset = formatResetDetails(quota?.claude?.weekly?.resetTime, true);
+                const claudeWeeklyPace = calcPaceStatus(quota?.claude?.weekly?.percent, quota?.claude?.weekly?.resetTime);
+
+                return E("div", {
+                    className: "absolute bottom-full right-2 mb-1 pointer-events-none flex items-center justify-end text-xs select-none z-30",
+                    children: [
+                        // 右寄せ: クォータ残量バッジ（マウスオーバー/クリック対象のみ pointer-events-auto）
+                        E("div", {
+                            className: "relative flex items-center pointer-events-auto",
+                            onMouseEnter: () => setIsHovered(true),
+                            onMouseLeave: () => setIsHovered(false),
+                            children: [
+                                E("button", {
+                                    type: "button",
+                                    onClick: handleClick,
+                                    title: "クリックでクォータ情報を即時更新 / ホバーで詳細表示",
+                                    className: "flex items-center gap-1.5 px-2 py-0.5 rounded border text-[11px] font-mono cursor-pointer transition-all bg-editor-background hover:bg-muted border-border text-foreground/90 hover:text-foreground shadow-sm whitespace-nowrap",
+                                    style: { backgroundColor: "var(--vscode-editor-background, #1e1e1e)" },
+                                    children: hasData ? [
+                                        E("div", {
+                                            className: "flex items-center gap-1 leading-none whitespace-nowrap",
+                                            children: [
+                                                E("span", {
+                                                    className: isRefreshing ? "inline-block animate-spin mr-0.5 text-[10px]" : "opacity-60 font-sans text-[10px] mr-0.5",
+                                                    children: isRefreshing ? "⚡" : ""
+                                                }),
+                                                E("span", { className: "opacity-60 font-sans text-[10px]", children: "AI rem." }),
+                                                E("span", { className: "opacity-60 font-sans text-[10px] ml-0.5", children: "G:" }),
+                                                E("span", { className: getColorClass(gPct), children: `${gPct ?? "--"}%` }),
+                                                E("span", { className: "opacity-30 mx-0.5", children: "|" }),
+                                                E("span", { className: "opacity-60 font-sans text-[10px]", children: "C:" }),
+                                                E("span", { className: getColorClass(cPct), children: `${cPct ?? "--"}%` })
+                                            ].filter(Boolean)
+                                        })
+                                    ] : [
+                                        E("span", { className: "text-muted-foreground text-[10px] whitespace-nowrap", children: "AI rem. 取得中..." })
+                                    ]
+                                }),
+
+                                // ホバー展開ツールチップ (漆黒背景 #0d0e11 / 余裕のある横幅 min-w-[340px] / 完全改行防止)
+                                (isHovered && quota) ? E("div", {
+                                    className: "absolute bottom-full right-0 mb-1.5 z-[99999] p-3 rounded-lg border shadow-2xl min-w-[340px] text-xs font-sans animate-in fade-in duration-100 whitespace-nowrap select-none",
+                                    style: {
+                                        backgroundColor: "#0d0e11",
+                                        color: "#e2e8f0",
+                                        borderColor: "#27272a",
+                                        pointerEvents: "none"
+                                    },
+                                    children: [
+                                        // タイトルバー (そのまま保持)
+                                        E("div", {
+                                            className: "flex items-center justify-between pb-1.5 mb-2 border-b border-white/10 gap-3 whitespace-nowrap",
+                                            children: [
+                                                E("span", {
+                                                    className: "font-semibold text-white flex items-center gap-1.5 whitespace-nowrap",
+                                                    children: ["⚡", " AI クォータ利用状況"]
+                                                }),
+                                                E("span", {
+                                                    className: "text-[10px] text-gray-400 whitespace-nowrap",
+                                                    children: "クリックで更新"
+                                                })
+                                            ]
+                                        }),
+
+                                        // Gemini Models
+                                        E("div", {
+                                            className: "flex flex-col gap-1 mb-2.5",
+                                            children: [
+                                                // 見出し & 正常/異常ステータス（右寄せ）
+                                                E("div", {
+                                                    className: "flex items-center justify-between font-medium text-[11px] gap-3 whitespace-nowrap",
+                                                    children: [
+                                                        E("span", { className: "font-semibold whitespace-nowrap", style: { color: "#60a5fa" }, children: "Gemini Models" }),
+                                                        E("span", {
+                                                            className: "text-[11px] font-medium whitespace-nowrap",
+                                                            style: { color: statusInfo?.gemini === "正常" ? "#34d399" : "#f87171" },
+                                                            children: statusInfo?.gemini || "正常"
+                                                        })
+                                                    ]
+                                                }),
+
+                                                // 5h remains
+                                                quota.gemini.h5 ? E("div", {
+                                                    className: "flex flex-col pl-1 text-[11px]",
+                                                    children: [
+                                                        E("div", {
+                                                            className: "flex items-center justify-between gap-3 whitespace-nowrap",
+                                                            children: [
+                                                                E("span", { className: "text-gray-300 whitespace-nowrap", children: "5h remains:" }),
+                                                                E("span", {
+                                                                    className: "whitespace-nowrap font-mono",
+                                                                    style: getColorStyle(quota.gemini.h5.percent),
+                                                                    children: `${quota.gemini.h5.percent ?? "--"}%`
+                                                                })
+                                                            ]
+                                                        }),
+                                                        E("div", {
+                                                            className: "text-[10px] text-gray-400 text-right whitespace-nowrap",
+                                                            children: `reset: ${gemini5hReset.absStr} (${gemini5hReset.relStr})`
+                                                        })
+                                                    ]
+                                                }) : null,
+
+                                                // 7d remains
+                                                quota.gemini.weekly ? E("div", {
+                                                    className: "flex flex-col pl-1 text-[11px] mt-0.5",
+                                                    children: [
+                                                        E("div", {
+                                                            className: "flex items-center justify-between gap-3 whitespace-nowrap",
+                                                            children: [
+                                                                E("span", { className: "text-gray-300 whitespace-nowrap", children: "7d remains:" }),
+                                                                E("div", {
+                                                                    className: "flex items-center gap-1.5 whitespace-nowrap",
+                                                                    children: [
+                                                                        E("span", {
+                                                                            className: "whitespace-nowrap font-mono",
+                                                                            style: getColorStyle(quota.gemini.weekly.percent),
+                                                                            children: `${quota.gemini.weekly.percent ?? "--"}%`
+                                                                        }),
+                                                                        geminiWeeklyPace ? E("span", {
+                                                                            className: "text-[10px] whitespace-nowrap px-1.5 py-0.2 rounded border",
+                                                                            style: {
+                                                                                ...getPaceStyle(geminiWeeklyPace),
+                                                                                borderColor: "rgba(255,255,255,0.1)",
+                                                                                backgroundColor: "rgba(255,255,255,0.03)"
+                                                                            },
+                                                                            children: geminiWeeklyPace
+                                                                        }) : null
+                                                                    ].filter(Boolean)
+                                                                })
+                                                            ]
+                                                        }),
+                                                        E("div", {
+                                                            className: "text-[10px] text-gray-400 text-right whitespace-nowrap",
+                                                            children: `reset: ${geminiWeeklyReset.absStr} (${geminiWeeklyReset.relStr})`
+                                                        })
+                                                    ]
+                                                }) : null
+                                            ].filter(Boolean)
+                                        }),
+
+                                        // Claude & GPT Models
+                                        E("div", {
+                                            className: "flex flex-col gap-1 pt-2 border-t border-white/10",
+                                            children: [
+                                                // 見出し & 正常/異常ステータス（右寄せ）
+                                                E("div", {
+                                                    className: "flex items-center justify-between font-medium text-[11px] gap-3 whitespace-nowrap",
+                                                    children: [
+                                                        E("span", { className: "font-semibold whitespace-nowrap", style: { color: "#fbbf24" }, children: "Claude & GPT Models" }),
+                                                        E("span", {
+                                                            className: "text-[11px] font-medium whitespace-nowrap",
+                                                            style: { color: statusInfo?.claude === "正常" ? "#34d399" : "#f87171" },
+                                                            children: statusInfo?.claude || "正常"
+                                                        })
+                                                    ]
+                                                }),
+
+                                                // 5h remains
+                                                quota.claude.h5 ? E("div", {
+                                                    className: "flex flex-col pl-1 text-[11px]",
+                                                    children: [
+                                                        E("div", {
+                                                            className: "flex items-center justify-between gap-3 whitespace-nowrap",
+                                                            children: [
+                                                                E("span", { className: "text-gray-300 whitespace-nowrap", children: "5h remains:" }),
+                                                                E("span", {
+                                                                    className: "whitespace-nowrap font-mono",
+                                                                    style: getColorStyle(quota.claude.h5.percent),
+                                                                    children: `${quota.claude.h5.percent ?? "--"}%`
+                                                                })
+                                                            ]
+                                                        }),
+                                                        E("div", {
+                                                            className: "text-[10px] text-gray-400 text-right whitespace-nowrap",
+                                                            children: `reset: ${claude5hReset.absStr} (${claude5hReset.relStr})`
+                                                        })
+                                                    ]
+                                                }) : null,
+
+                                                // 7d remains
+                                                quota.claude.weekly ? E("div", {
+                                                    className: "flex flex-col pl-1 text-[11px] mt-0.5",
+                                                    children: [
+                                                        E("div", {
+                                                            className: "flex items-center justify-between gap-3 whitespace-nowrap",
+                                                            children: [
+                                                                E("span", { className: "text-gray-300 whitespace-nowrap", children: "7d remains:" }),
+                                                                E("div", {
+                                                                    className: "flex items-center gap-1.5 whitespace-nowrap",
+                                                                    children: [
+                                                                        E("span", {
+                                                                            className: "whitespace-nowrap font-mono",
+                                                                            style: getColorStyle(quota.claude.weekly.percent),
+                                                                            children: `${quota.claude.weekly.percent ?? "--"}%`
+                                                                        }),
+                                                                        claudeWeeklyPace ? E("span", {
+                                                                            className: "text-[10px] whitespace-nowrap px-1.5 py-0.2 rounded border",
+                                                                            style: {
+                                                                                ...getPaceStyle(claudeWeeklyPace),
+                                                                                borderColor: "rgba(255,255,255,0.1)",
+                                                                                backgroundColor: "rgba(255,255,255,0.03)"
+                                                                            },
+                                                                            children: claudeWeeklyPace
+                                                                        }) : null
+                                                                    ].filter(Boolean)
+                                                                })
+                                                            ]
+                                                        }),
+                                                        E("div", {
+                                                            className: "text-[10px] text-gray-400 text-right whitespace-nowrap",
+                                                            children: `reset: ${claudeWeeklyReset.absStr} (${claudeWeeklyReset.relStr})`
+                                                        })
+                                                    ]
+                                                }) : null
+                                            ].filter(Boolean)
+                                        })
+                                    ]
+                                }) : null
+                            ].filter(Boolean)
+                        })
+                    ]
+                });
+            } catch (err) {
+                console.error("[AGY Patch] VitalsBar render error:", err);
+                return null;
+            }
         };
     };
 

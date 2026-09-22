@@ -1,8 +1,9 @@
 # 🚀 Antigravity IDE Enhanced Chat & Session Patch
 
-Google DeepMind の次世代 AI エディタ **Antigravity IDE** のチャットパネル（Agent Side Panel）に、**「セッション一覧ドロワー」「セッション名の変更」「ピン留め」「Enter改行 / Ctrl+Enter送信」** を追加するセルフパッチツールです。
+Google DeepMind の次世代 AI エディタ **Antigravity IDE** のチャットパネル（Agent Side Panel）に、**「セッション一覧ドロワー」「セッション名の変更」「ピン留め」「Enter改行 / Ctrl+Enter送信」「AIクォータ利用状況モニター（Vitals）」** を追加するセルフパッチツールです。
 
 独立モジュール構成を採用しており、インストーラー（`apply_patch.py`）を実行するだけで安全かつ自動的に適用されます。`product.json` のチェックサム更新も自動で行われるため、**破損警告（Corrupted Installation WARNING）は発生しません**。(パッチ適用直後は警告が表示される可能性がありますが、その場合は再起動すれば出なくなるはずです)
+万が一元に戻したくなった場合も、同梱の `rollback.py` を実行するだけでワンタッチ復元可能です。
 
 ---
 
@@ -56,6 +57,22 @@ Google DeepMind の次世代 AI エディタ **Antigravity IDE** のチャット
   ダイアログ内にはパッチで追加されたコマンド（`antigravity.session.*`）と規定キー、機能内容が表示されているので、keybindings.json編集時に参考にしてください。（※現在、ショートカットキー設定(GUI)はフリーズが多発するため、keybindings.jsonを直接編集することを推奨します。）
 - **保存とリロード**:
   設定保存後に「保存してリロード」を押すだけで、ウィンドウの再読み込みまで自動で行われます。
+
+---
+
+### 6. ⚡ AI クォータ利用状況モニター（Vitals バッジ）
+
+チャット入力欄上部（Review changes ツールバー直上）に、Google Gemini および Claude / GPT の **リアルタイム利用状況（残りパーセント）** をモニタリングするフローティングバッジを追加します。
+
+- **常時表示 (`AI rem. G: nn% | C: nn%`)**:
+  - チャット履歴のスクロールを妨げない透過フローティング配置。
+  - 残量が少なくなると色で警告（25%以下で黄色、10%未満で赤色強調）。
+  - クリックで即座に最新情報を手動リフレッシュ可能。
+- **ホバー詳細ポップアップ**:
+  - バッジにマウスを乗せると、見やすいダーク背景のカードがポップアップ。
+  - **サービス稼働ステータス**: 各社公式ステータス（Google Cloud / Anthropic）と連携し、障害発生時は「異常（赤）」、通常時は「正常（緑）」を表示。
+  - **5時間枠 / 7日間枠の個別残量**: それぞれの残量と正確な次回リセット日時を表示。
+  - **7日間枠の消費ペース判定**: 時間経過と消費率を分析し、`⚡ 適正ペース`（緑）/ `⚡ 安全ペース`（シアン）/ `⚡ ハイペース注意`（赤）をリアルタイム判定。
 
 ---
 
@@ -128,6 +145,7 @@ python apply_patch.py
 antigravity_ide_selfpatch/
 ├── antigravity-session-patch.js                  # 独立モジュール原本 (UI & 全ロジック)
 ├── apply_patch.py                                # ワンクリック自動インストーラー
+├── rollback.py                                   # ワンクリック復元スクリプト
 └── README.md                                     # 本ドキュメント
 ```
 
@@ -138,18 +156,10 @@ antigravity_ide_selfpatch/
 
 ## 🔙 アンインストール（ロールバック）
 
-パッチを完全に解除し、元の公式状態に戻したい場合は以下のコマンドを実行します：
-
-### Windows (PowerShell)
-
-```powershell
-Copy-Item "$env:LOCALAPPDATA\Programs\Antigravity IDE\resources\app\out\vs\workbench\workbench.desktop.main.js.backup_before_patch" "$env:LOCALAPPDATA\Programs\Antigravity IDE\resources\app\out\vs\workbench\workbench.desktop.main.js" -Force
-```
-
-### macOS
+パッチを完全に解除し、元の公式状態に戻したい場合は、ターミナルで以下を実行するだけで安全に初期状態へ復元されます（`product.json` チェックサムも自動再計算されます）：
 
 ```bash
-cp "/Applications/Antigravity IDE.app/Contents/Resources/app/out/vs/workbench/workbench.desktop.main.js.backup_before_patch" "/Applications/Antigravity IDE.app/Contents/Resources/app/out/vs/workbench/workbench.desktop.main.js"
+python rollback.py
 ```
 
 復元後、同様に `Developer: Reload Window` を実行してください。
