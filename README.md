@@ -62,11 +62,11 @@ Google DeepMind の次世代 AI エディタ **Antigravity IDE** のチャット
 
 ### 6. ⚡ AI クォータ利用状況モニター（Vitals バッジ）
 
-チャット入力欄上部に、Google Gemini および Claude / GPT の **リアルタイム利用状況（残りパーセント）** をモニタリングするフローティングバッジを追加します。
+チャット入力欄上部に、Google Gemini および Claude / GPT の **リアルタイム利用状況（残りパーセント）** をモニタリングするフローティングバッジを追加。
 
 - **常時表示 (`AI rem. G: nn% | C: nn%`)**:
   - 残量が少なくなると色で警告（25%以下で黄色、10%未満で赤色強調）。
-  - クリックで即座に最新情報を手動リフレッシュ可能。
+  - クリックで最新情報を手動リフレッシュ。
 - **ホバー詳細ポップアップ**:
   - バッジにマウスを乗せると、詳細がポップアップ。
   - **サービス稼働ステータス**: 各社公式ステータス（Google Cloud / Anthropic）と連携し、障害発生時は「異常（赤）」、通常時は「正常（緑）」を表示。
@@ -109,7 +109,7 @@ Google DeepMind の次世代 AI エディタ **Antigravity IDE** のチャット
    python apply_patch.py
    ```
 
-3. IDE 上で `F1` または `Ctrl + Shift + P`（Mac: `Cmd + Shift + P`）を押し、**`Developer: Reload Window`**（開発者: ウィンドウの再読み込み）を実行します。
+3. Antigravity IDE 上で `F1` または `Ctrl + Shift + P`（Mac: `Cmd + Shift + P`）を押し、**`Developer: Reload Window`**（開発者: ウィンドウの再読み込み）を実行します。
 
 #### 方法 B: リポジトリをクローン
 

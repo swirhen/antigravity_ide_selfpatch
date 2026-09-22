@@ -36,4 +36,4 @@
    python apply_patch.py
    ```
 
-3. Antigravity IDE で `Ctrl + Shift + P` -> `Developer: Reload Window` を実行します。
+3. Antigravity IDE 上で `F1` または `Ctrl + Shift + P`（Mac: `Cmd + Shift + P`）を押し、**`Developer: Reload Window`**（開発者: ウィンドウの再読み込み）を実行します。
