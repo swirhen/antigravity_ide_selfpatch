@@ -20,3 +20,6 @@ desktop.ini
 # Release artifacts
 *.zip
 dist/
+
+# Drafts / Articles
+Qiita*.md
