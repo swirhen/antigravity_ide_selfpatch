@@ -19,9 +19,13 @@
             rename: { primary: "rename", short: "ren", label: "セッション名変更" },
             pin: { primary: "pin", short: "p", label: "セッションをピン留め" },
             unpin: { primary: "unpin", short: "up", label: "ピン留めを解除" },
-            new: { primary: "new", short: "n", label: "新規セッション開始" }
+            new: { primary: "new", short: "n", label: "新規セッション開始" },
+            archive: { primary: "archive", short: "arc", label: "セッションをアーカイブ" },
+            unarchive: { primary: "unarchive", short: "unarc", label: "アーカイブを解除" }
         }
     };
+
+    const ARCHIVE_DRAWER_KEY = 'antigravity.patch.archiveDrawerOpen';
 
     function escapeRegExp(string) {
         return (string || "").replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -63,6 +67,16 @@
                         primary: cleanCmdName(parsed.commands?.new?.primary) || DEFAULT_CONFIG.commands.new.primary,
                         short: cleanCmdName(parsed.commands?.new?.short) || DEFAULT_CONFIG.commands.new.short,
                         label: DEFAULT_CONFIG.commands.new.label
+                    },
+                    archive: {
+                        primary: cleanCmdName(parsed.commands?.archive?.primary) || DEFAULT_CONFIG.commands.archive.primary,
+                        short: cleanCmdName(parsed.commands?.archive?.short) || DEFAULT_CONFIG.commands.archive.short,
+                        label: DEFAULT_CONFIG.commands.archive.label
+                    },
+                    unarchive: {
+                        primary: cleanCmdName(parsed.commands?.unarchive?.primary) || DEFAULT_CONFIG.commands.unarchive.primary,
+                        short: cleanCmdName(parsed.commands?.unarchive?.short) || DEFAULT_CONFIG.commands.unarchive.short,
+                        label: DEFAULT_CONFIG.commands.unarchive.label
                     }
                 }
             };
@@ -385,7 +399,9 @@
                 { id: "rename", label: "セッション名変更" },
                 { id: "pin", label: "ピン留め" },
                 { id: "unpin", label: "ピン留め解除" },
-                { id: "new", label: "新規会話" }
+                { id: "new", label: "新規会話" },
+                { id: "archive", label: "アーカイブ" },
+                { id: "unarchive", label: "アーカイブ解除" }
             ];
 
             cmdList.forEach(item => {
@@ -753,10 +769,44 @@
             }
         };
 
+        const onArchive = async () => {
+            if (!O) {
+                notify({ title: "有効なセッションが見つかりません", autoDismissMs: 3e3 });
+                focusChatInput();
+                return;
+            }
+            try {
+                optSummary({ type: "updateAnnotations", cascadeId: O, annotations: { archived: true } });
+                await renameConv(O, Ut(h4e, { archived: true }), true);
+                notify({ title: "セッションをアーカイブしました", autoDismissMs: 3e3 });
+            } catch (err) {
+                notify({ title: "アーカイブに失敗しました", message: String(err), autoDismissMs: 5e3 });
+            }
+            focusChatInput();
+        };
+
+        const onUnarchive = async () => {
+            if (!O) {
+                notify({ title: "有効なセッションが見つかりません", autoDismissMs: 3e3 });
+                focusChatInput();
+                return;
+            }
+            try {
+                optSummary({ type: "updateAnnotations", cascadeId: O, annotations: { archived: false } });
+                await renameConv(O, Ut(h4e, { archived: false }), true);
+                notify({ title: "アーカイブを解除しました", autoDismissMs: 3e3 });
+            } catch (err) {
+                notify({ title: "アーカイブ解除に失敗しました", message: String(err), autoDismissMs: 5e3 });
+            }
+            focusChatInput();
+        };
+
         window.addEventListener("action-session-rename", onRename);
         window.addEventListener("action-session-pin", onPin);
         window.addEventListener("action-session-unpin", onUnpin);
         window.addEventListener("action-session-new", onNew);
+        window.addEventListener("action-session-archive", onArchive);
+        window.addEventListener("action-session-unarchive", onUnarchive);
         document.addEventListener("click", onHeaderTitleClick, true);
 
         return () => {
@@ -764,6 +814,8 @@
             window.removeEventListener("action-session-pin", onPin);
             window.removeEventListener("action-session-unpin", onUnpin);
             window.removeEventListener("action-session-new", onNew);
+            window.removeEventListener("action-session-archive", onArchive);
+            window.removeEventListener("action-session-unarchive", onUnarchive);
             document.removeEventListener("click", onHeaderTitleClick, true);
         };
     };
@@ -877,6 +929,44 @@
             return true;
         }
 
+        // archive
+        if (matchCmd("archive", false)) {
+            Z$(rf); Ot(); Dt([]);
+            if (ti) { rf.getRootElement()?.blur(); fV(false); }
+            if (O) {
+                try {
+                    optSummary({ type: "updateAnnotations", cascadeId: O, annotations: { archived: true } });
+                    await renameConv(O, Ut(h4e, { archived: true }), true);
+                    notify({ title: "セッションをアーカイブしました", autoDismissMs: 3e3 });
+                } catch (err) {
+                    notify({ title: "アーカイブに失敗しました", message: String(err), autoDismissMs: 5e3 });
+                }
+            } else {
+                notify({ title: "有効なセッションが見つかりません", autoDismissMs: 3e3 });
+            }
+            focusChatInput();
+            return true;
+        }
+
+        // unarchive
+        if (matchCmd("unarchive", false)) {
+            Z$(rf); Ot(); Dt([]);
+            if (ti) { rf.getRootElement()?.blur(); fV(false); }
+            if (O) {
+                try {
+                    optSummary({ type: "updateAnnotations", cascadeId: O, annotations: { archived: false } });
+                    await renameConv(O, Ut(h4e, { archived: false }), true);
+                    notify({ title: "アーカイブを解除しました", autoDismissMs: 3e3 });
+                } catch (err) {
+                    notify({ title: "アーカイブ解除に失敗しました", message: String(err), autoDismissMs: 5e3 });
+                }
+            } else {
+                notify({ title: "有効なセッションが見つかりません", autoDismissMs: 3e3 });
+            }
+            focusChatInput();
+            return true;
+        }
+
         return false;
     };
 
@@ -898,6 +988,20 @@
             const [filterText, setFilterText] = We("");
             const [curIdx, setCurIdx] = We(0);
             const lastMousePos = mt({ x: -1, y: -1 });
+
+            // アーカイブ済みトグルの開閉状態（localStorage で永続化）
+            const [archiveOpen, setArchiveOpen] = We(() => {
+                try {
+                    return localStorage.getItem(ARCHIVE_DRAWER_KEY) === 'true';
+                } catch (_e) { return false; }
+            });
+            const toggleArchiveSection = () => {
+                setArchiveOpen((prev) => {
+                    const next = !prev;
+                    try { localStorage.setItem(ARCHIVE_DRAWER_KEY, String(next)); } catch (_e) { }
+                    return next;
+                });
+            };
 
             const { trajectorySummariesProvider: tP } = Of();
             const summariesState = nl(tP);
@@ -984,6 +1088,23 @@
                 }
             };
 
+            const toggleArchive = async (cid, curArchived, ev) => {
+                ev?.stopPropagation();
+                if (!cid) return;
+                const nextArchived = !curArchived;
+                try {
+                    optSummaryDrawer({ type: "updateAnnotations", cascadeId: cid, annotations: { archived: nextArchived } });
+                    await pinConv(cid, Ut(h4e, { archived: nextArchived }), true);
+                    // アーカイブ済みセクションを自動で開く
+                    if (nextArchived) {
+                        setArchiveOpen(true);
+                        try { localStorage.setItem(ARCHIVE_DRAWER_KEY, 'true'); } catch (_e) { }
+                    }
+                } catch (err) {
+                    console.error("Archive toggle failed:", err);
+                }
+            };
+
             const deleteSession = async (cid, ev) => {
                 ev?.stopPropagation();
                 const isActive = cid === activeCascadeId;
@@ -1000,7 +1121,7 @@
                 }
             };
 
-            // セッション一覧のフィルタ＆ソート
+            // セッション一覧のフィルタ＆ソート（アーカイブ済みは除外）
             // 要件: 現在開いているセッション（activeCascadeId）を最優先で一番上に配置！
             // その後は ピン留め優先 -> 最終更新時刻の降順
             const filteredSessions = Re(() => {
@@ -1024,6 +1145,17 @@
                     return toMs(y.summary) - toMs(b.summary);
                 }), list;
             }, [summariesMap, sessionEntries.length, filterText, activeCascadeId]);
+
+            // アーカイブ済みセッション一覧（検索フィルター対象外・更新時刻降順）
+            const filteredArchived = Re(() => {
+                const list = (sessionEntries || []).filter((item) => {
+                    const s = item.summary;
+                    if (!s || !s.annotations?.archived) return false;
+                    if (s.trajectoryMetadata?.parentConversationId) return false;
+                    return true;
+                });
+                return list.sort((a, b) => toMs(b.summary) - toMs(a.summary));
+            }, [summariesMap, sessionEntries.length]);
 
             yt(() => {
                 setCurIdx(0);
@@ -1277,7 +1409,7 @@
                                                     ]
                                                 }),
 
-                                                // 右側: ピン操作 + 経過時間 + 削除ボタン
+                                                // 右側: ピン操作 + アーカイブ + 経過時間 + 削除ボタン
                                                 E("div", {
                                                     className: "flex items-center gap-1.5 shrink-0",
                                                     children: [
@@ -1290,6 +1422,13 @@
                                                             title: isPinned ? "ピン留めを解除" : "ピン留め",
                                                             onClick: (ev) => togglePin(cid, isPinned, ev),
                                                             children: E($e, { name: "keep", size: 12 })
+                                                        }),
+                                                        E("button", {
+                                                            type: "button",
+                                                            className: "p-0.5 rounded text-muted-foreground opacity-0 group-hover:opacity-70 hover:!opacity-100 hover:bg-secondary-foreground/15 transition-all cursor-pointer",
+                                                            title: "アーカイブ",
+                                                            onClick: (ev) => toggleArchive(cid, false, ev),
+                                                            children: E($e, { name: "inventory_2", size: 12 })
                                                         }),
                                                         timeAgo && E("span", {
                                                             className: "text-[11px] text-muted-foreground/90 group-hover:text-foreground/90 shrink-0 font-normal transition-colors",
@@ -1307,6 +1446,97 @@
                                             ]
                                         });
                                     })
+                            }),
+
+                            // アーカイブ済みセクション
+                            filteredArchived.length > 0 && E("div", {
+                                className: "border-t border-border/50 mt-0.5",
+                                children: [
+                                    // アーカイブ済みトグルヘッダー
+                                    E("div", {
+                                        className: "flex items-center gap-1.5 px-2 py-1 cursor-pointer hover:bg-secondary/50 transition-colors select-none",
+                                        onClick: toggleArchiveSection,
+                                        children: [
+                                            E($e, {
+                                                name: "keyboard_arrow_down",
+                                                size: 12,
+                                                className: "text-muted-foreground shrink-0 transition-transform",
+                                                style: { transform: archiveOpen ? "rotate(0deg)" : "rotate(-90deg)" }
+                                            }),
+                                            E($e, { name: "inventory_2", size: 12, className: "text-muted-foreground/70 shrink-0" }),
+                                            E("span", {
+                                                className: "text-[11px] text-muted-foreground/80",
+                                                children: `アーカイブ済み (${filteredArchived.length})`
+                                            })
+                                        ]
+                                    }),
+
+                                    // アーカイブ済みリスト
+                                    archiveOpen && E("div", {
+                                        className: "overflow-y-auto max-h-40 flex flex-col gap-0.5 pr-0.5",
+                                        children: filteredArchived.map((item) => {
+                                            const cid = item.cascadeId;
+                                            const isActive = cid === activeCascadeId;
+                                            const title = typeof item.summary?.summary === "string" && item.summary.summary
+                                                ? item.summary.summary
+                                                : (typeof item.summary?.title === "string" && item.summary.title
+                                                    ? item.summary.title
+                                                    : "無題のセッション");
+                                            const timeAgo = fmtAgo(toMs(item.summary));
+
+                                            return E("div", {
+                                                key: cid,
+                                                onClick: () => {
+                                                    if (!isActive) setCascadeId(cid);
+                                                    setIsOpen(false);
+                                                    focusChatInput();
+                                                },
+                                                className: yi(
+                                                    "flex items-center justify-between px-2 py-1 rounded cursor-pointer transition-colors group text-xs select-none opacity-60 hover:opacity-100",
+                                                    isActive
+                                                        ? "bg-primary/10 text-foreground border-l-2 border-primary"
+                                                        : "hover:bg-secondary text-foreground/70 hover:text-foreground"
+                                                ),
+                                                children: [
+                                                    E("div", {
+                                                        className: "flex items-center gap-1.5 min-w-0 pr-2",
+                                                        children: [
+                                                            E($e, { name: "inventory_2", size: 12, className: "text-muted-foreground shrink-0 opacity-60" }),
+                                                            E("span", { className: "truncate", title: title, children: title }),
+                                                            isActive && E("span", {
+                                                                className: "text-[10px] px-1 py-0.2 rounded bg-primary/20 text-primary font-normal shrink-0",
+                                                                children: "現在"
+                                                            })
+                                                        ]
+                                                    }),
+                                                    E("div", {
+                                                        className: "flex items-center gap-1.5 shrink-0",
+                                                        children: [
+                                                            E("button", {
+                                                                type: "button",
+                                                                className: "p-0.5 rounded text-muted-foreground opacity-0 group-hover:opacity-70 hover:!opacity-100 hover:bg-secondary-foreground/15 transition-all cursor-pointer",
+                                                                title: "アーカイブを解除",
+                                                                onClick: (ev) => toggleArchive(cid, true, ev),
+                                                                children: E($e, { name: "unarchive", size: 12 })
+                                                            }),
+                                                            timeAgo && E("span", {
+                                                                className: "text-[11px] text-muted-foreground/70 shrink-0 font-normal",
+                                                                children: timeAgo
+                                                            }),
+                                                            E("button", {
+                                                                type: "button",
+                                                                className: "p-0.5 rounded text-red-500/70 hover:text-red-500 hover:bg-destructive/20 opacity-0 group-hover:opacity-100 transition-all cursor-pointer",
+                                                                title: "セッションを削除",
+                                                                onClick: (ev) => deleteSession(cid, ev),
+                                                                children: E($e, { name: "delete", size: 12 })
+                                                            })
+                                                        ]
+                                                    })
+                                                ]
+                                            });
+                                        })
+                                    })
+                                ]
                             })
                         ]
                     })
