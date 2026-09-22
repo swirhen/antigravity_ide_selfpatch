@@ -1,5 +1,5 @@
 /*
- * Antigravity IDE - セッション一覧・名前変更・改行パッチ 独立モジュール
+ * Antigravity IDE - チャットペイン機能拡張パッチ 独立モジュール
  * File: antigravity-session-patch.js
  */
 (function (global) {
@@ -17,9 +17,9 @@
         commands: {
             resume: { primary: "resume", short: "res", label: "セッション一覧表示" },
             rename: { primary: "rename", short: "ren", label: "セッション名変更" },
-            pin:    { primary: "pin",    short: "p",   label: "セッションをピン留め" },
-            unpin:  { primary: "unpin",  short: "up",  label: "ピン留めを解除" },
-            new:    { primary: "new",    short: "n",   label: "新規セッション開始" }
+            pin: { primary: "pin", short: "p", label: "セッションをピン留め" },
+            unpin: { primary: "unpin", short: "up", label: "ピン留めを解除" },
+            new: { primary: "new", short: "n", label: "新規セッション開始" }
         }
     };
 
@@ -150,7 +150,7 @@
         let retryCount = 0;
         const tryFocus = () => {
             const inp = document.querySelector('div[aria-label="Message input"]') ||
-                        document.querySelector('[contenteditable="true"]');
+                document.querySelector('[contenteditable="true"]');
             if (inp) {
                 inp.focus();
                 try {
@@ -160,7 +160,7 @@
                     rng.collapse(false);
                     sel.removeAllRanges();
                     sel.addRange(rng);
-                } catch (_e) {}
+                } catch (_e) { }
             } else if (retryCount < 8) {
                 retryCount++;
                 setTimeout(tryFocus, 50);
@@ -383,9 +383,9 @@
             const cmdList = [
                 { id: "resume", label: "セッション一覧" },
                 { id: "rename", label: "セッション名変更" },
-                { id: "pin",    label: "ピン留め" },
-                { id: "unpin",  label: "ピン留め解除" },
-                { id: "new",    label: "新規会話" }
+                { id: "pin", label: "ピン留め" },
+                { id: "unpin", label: "ピン留め解除" },
+                { id: "new", label: "新規会話" }
             ];
 
             cmdList.forEach(item => {
@@ -646,7 +646,7 @@
             console.error("showSettingsDialog error:", err);
             try {
                 alert("設定ダイアログの表示エラー:\n" + String(err));
-            } catch (_e) {}
+            } catch (_e) { }
         }
     }
     patch.showSettingsDialog = showSettingsDialog;
@@ -736,7 +736,7 @@
                 `;
                 document.head.appendChild(style);
             }
-        } catch (_e) {}
+        } catch (_e) { }
 
         // ヘッダーセッションタイトルのクリックイベント (クリックで名前変更)
         const onHeaderTitleClick = (e) => {
@@ -783,7 +783,7 @@
             if (!cmd) return false;
             const parts = [cmd.primary, cmd.short].map(cleanCmdName).filter(Boolean).map(escapeRegExp);
             if (parts.length === 0) return false;
-            const reg = new RegExp(`^:(${parts.join("|")})${allowArgs ? "(\\s.*)?" : "$"}` , "i");
+            const reg = new RegExp(`^:(${parts.join("|")})${allowArgs ? "(\\s.*)?" : "$"}`, "i");
             return reg.test(txt);
         };
 
@@ -851,7 +851,7 @@
             if (!nextTitle) {
                 try {
                     nextTitle = await showPromptDialog("新しいセッション名を入力してください:", getCurTitle());
-                } catch (_e) {}
+                } catch (_e) { }
             }
             Z$(rf); Ot(); Dt([]);
             if (ti) { rf.getRootElement()?.blur(); fV(false); }
@@ -892,7 +892,7 @@
                 if (wb && wb._commandService) {
                     patch._commandService = wb._commandService;
                 }
-            } catch (_e) {}
+            } catch (_e) { }
 
             const [isOpen, setIsOpen] = We(false);
             const [filterText, setFilterText] = We("");
@@ -1008,7 +1008,7 @@
                     const s = item.summary;
                     if (!s || s.annotations?.archived || s.trajectoryMetadata?.parentConversationId) return false;
                     const title = typeof s.summary === "string" && s.summary ? s.summary :
-                                  (typeof s.title === "string" && s.title ? s.title : "無題のセッション");
+                        (typeof s.title === "string" && s.title ? s.title : "無題のセッション");
                     return filterText ? title.toLowerCase().includes(filterText.toLowerCase()) : true;
                 });
 
@@ -1064,7 +1064,7 @@
                                 t = txt.includes(">") ? txt.split(">").pop().trim() : txt;
                             }
                         }
-                    } catch (_e) {}
+                    } catch (_e) { }
                 }
                 return (t && t !== "Untitled Conversation" && t !== "Agent") ? t : `過去セッション (${filteredSessions.length})`;
             })();
@@ -1342,7 +1342,7 @@
 
     patch._notifyVitalsChange = function () {
         for (const fn of patch._vitalsListeners) {
-            try { fn(patch._lsQuotaCache); } catch (_e) {}
+            try { fn(patch._lsQuotaCache); } catch (_e) { }
         }
     };
 
@@ -1372,7 +1372,7 @@
                         patch._statusCache.gemini = isBad ? "異常" : "正常";
                     }
                 })
-                .catch(() => {});
+                .catch(() => { });
 
             // Claude / Anthropic
             fetch("https://status.claude.com/api/v2/summary.json")
@@ -1381,8 +1381,8 @@
                     const indicator = data?.status?.indicator;
                     patch._statusCache.claude = (indicator && indicator !== "none") ? "異常" : "正常";
                 })
-                .catch(() => {});
-        } catch (_e) {}
+                .catch(() => { });
+        } catch (_e) { }
         return patch._statusCache;
     };
 
@@ -1476,7 +1476,7 @@
                                 json = await resp.json();
                                 if (json?.response?.groups) break;
                             }
-                        } catch (_err) {}
+                        } catch (_err) { }
                     }
                     if (json?.response?.groups) break;
                 }
