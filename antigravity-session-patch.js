@@ -1577,6 +1577,7 @@
     };
 
     // サービス稼働ステータス取得 (Google & Claude)
+    // ai-vitals 準拠のステータス詳細判定（重大な障害 / 軽微な障害 / 正常 / 取得不可）
     patch._statusCache = { gemini: "正常", claude: "正常", lastCheck: 0 };
     patch.fetchServiceStatuses = async function (force = false) {
         const now = Date.now();
@@ -1591,15 +1592,20 @@
                 .then(incs => {
                     if (Array.isArray(incs)) {
                         const active = incs.filter(i => !i.end);
-                        let isBad = false;
+                        let state = "正常";
                         for (const inc of active) {
                             const desc = `${inc.service_name || ""} ${inc.external_desc || ""}`.toLowerCase();
                             if (/gemini|vertex|generative|ai platform|language/.test(desc)) {
-                                isBad = true;
-                                break;
+                                const sev = (inc.severity || "").toLowerCase();
+                                if (sev === "high" || sev === "critical" || sev === "major") {
+                                    state = "重大な障害";
+                                    break;
+                                } else {
+                                    state = "軽微な障害";
+                                }
                             }
                         }
-                        patch._statusCache.gemini = isBad ? "異常" : "正常";
+                        patch._statusCache.gemini = state;
                     }
                 })
                 .catch(() => { });
@@ -1609,7 +1615,13 @@
                 .then(r => r.json())
                 .then(data => {
                     const indicator = data?.status?.indicator;
-                    patch._statusCache.claude = (indicator && indicator !== "none") ? "異常" : "正常";
+                    if (!indicator || indicator === "none") {
+                        patch._statusCache.claude = "正常";
+                    } else if (indicator === "major" || indicator === "critical") {
+                        patch._statusCache.claude = "重大な障害";
+                    } else {
+                        patch._statusCache.claude = "軽微な障害";
+                    }
                 })
                 .catch(() => { });
         } catch (_e) { }
@@ -1838,6 +1850,14 @@
                     return { color: "#34d399", fontWeight: "500" };                                 // 緑 (適正ペース)
                 };
 
+                // サービステータスカラー (ai-vitals 準拠: 正常=緑 / 軽微な障害=黄 / 重大な障害=赤)
+                const getServiceStatusStyle = (st) => {
+                    if (!st || st === "正常") return { color: "#34d399" };
+                    if (st === "軽微な障害") return { color: "#fbbf24" };
+                    if (st === "重大な障害") return { color: "#f87171", fontWeight: "600" };
+                    return { color: "#94a3b8" };
+                };
+
                 const hasData = gPct !== null || cPct !== null;
 
                 // 各種詳細データの計算
@@ -1921,7 +1941,7 @@
                                                         E("span", { className: "font-semibold whitespace-nowrap", style: { color: "#60a5fa" }, children: "Gemini Models" }),
                                                         E("span", {
                                                             className: "text-[11px] font-medium whitespace-nowrap",
-                                                            style: { color: statusInfo?.gemini === "正常" ? "#34d399" : "#f87171" },
+                                                            style: getServiceStatusStyle(statusInfo?.gemini),
                                                             children: statusInfo?.gemini || "正常"
                                                         })
                                                     ]
@@ -1960,11 +1980,6 @@
                                                                 E("div", {
                                                                     className: "flex items-center gap-1.5 whitespace-nowrap",
                                                                     children: [
-                                                                        E("span", {
-                                                                            className: "whitespace-nowrap font-mono",
-                                                                            style: getColorStyle(quota.gemini.weekly.percent),
-                                                                            children: `${quota.gemini.weekly.percent ?? "--"}%`
-                                                                        }),
                                                                         geminiWeeklyPace ? E("span", {
                                                                             className: "text-[10px] whitespace-nowrap px-1.5 py-0.2 rounded border",
                                                                             style: {
@@ -1973,7 +1988,12 @@
                                                                                 backgroundColor: "rgba(255,255,255,0.03)"
                                                                             },
                                                                             children: geminiWeeklyPace
-                                                                        }) : null
+                                                                        }) : null,
+                                                                        E("span", {
+                                                                            className: "whitespace-nowrap font-mono",
+                                                                            style: getColorStyle(quota.gemini.weekly.percent),
+                                                                            children: `${quota.gemini.weekly.percent ?? "--"}%`
+                                                                        })
                                                                     ].filter(Boolean)
                                                                 })
                                                             ]
@@ -1998,7 +2018,7 @@
                                                         E("span", { className: "font-semibold whitespace-nowrap", style: { color: "#fbbf24" }, children: "Claude & GPT Models" }),
                                                         E("span", {
                                                             className: "text-[11px] font-medium whitespace-nowrap",
-                                                            style: { color: statusInfo?.claude === "正常" ? "#34d399" : "#f87171" },
+                                                            style: getServiceStatusStyle(statusInfo?.claude),
                                                             children: statusInfo?.claude || "正常"
                                                         })
                                                     ]
@@ -2037,11 +2057,6 @@
                                                                 E("div", {
                                                                     className: "flex items-center gap-1.5 whitespace-nowrap",
                                                                     children: [
-                                                                        E("span", {
-                                                                            className: "whitespace-nowrap font-mono",
-                                                                            style: getColorStyle(quota.claude.weekly.percent),
-                                                                            children: `${quota.claude.weekly.percent ?? "--"}%`
-                                                                        }),
                                                                         claudeWeeklyPace ? E("span", {
                                                                             className: "text-[10px] whitespace-nowrap px-1.5 py-0.2 rounded border",
                                                                             style: {
@@ -2050,7 +2065,12 @@
                                                                                 backgroundColor: "rgba(255,255,255,0.03)"
                                                                             },
                                                                             children: claudeWeeklyPace
-                                                                        }) : null
+                                                                        }) : null,
+                                                                        E("span", {
+                                                                            className: "whitespace-nowrap font-mono",
+                                                                            style: getColorStyle(quota.claude.weekly.percent),
+                                                                            children: `${quota.claude.weekly.percent ?? "--"}%`
+                                                                        })
                                                                     ].filter(Boolean)
                                                                 })
                                                             ]
