@@ -26,6 +26,61 @@
     };
 
     const ARCHIVE_DRAWER_KEY = 'antigravity.patch.archiveDrawerOpen';
+    const SESSION_SUMMARIES_CACHE_KEY = 'antigravity.patch.sessionSummaries';
+    const SESSION_SUMMARIES_CACHE_LIMIT = 1000;
+
+    function readSessionSummariesCache() {
+        try {
+            const raw = localStorage.getItem(SESSION_SUMMARIES_CACHE_KEY);
+            const parsed = raw ? JSON.parse(raw) : {};
+            return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+        } catch (_e) {
+            return {};
+        }
+    }
+
+    function cacheableSessionSummary(summary) {
+        if (!summary || typeof summary !== "object") return null;
+        return {
+            summary: typeof summary.summary === "string" ? summary.summary : "",
+            title: typeof summary.title === "string" ? summary.title : "",
+            annotations: summary.annotations && typeof summary.annotations === "object"
+                ? summary.annotations
+                : {},
+            trajectoryMetadata: summary.trajectoryMetadata && typeof summary.trajectoryMetadata === "object"
+                ? { parentConversationId: summary.trajectoryMetadata.parentConversationId || "" }
+                : {},
+            lastUserInputTime: summary.lastUserInputTime || null,
+            lastModifiedTime: summary.lastModifiedTime || null,
+            createdTime: summary.createdTime || null
+        };
+    }
+
+    function persistSessionSummaries(summaries) {
+        try {
+            const entries = Object.entries(summaries || {})
+                .map(([cascadeId, summary]) => {
+                    const cached = cacheableSessionSummary(summary);
+                    return cached ? { cascadeId, summary: cached } : null;
+                })
+                .filter(Boolean)
+                .sort((a, b) => {
+                    const getTime = (item) => Number(
+                        item.summary.lastUserInputTime?.seconds ??
+                        item.summary.lastModifiedTime?.seconds ??
+                        item.summary.createdTime?.seconds ??
+                        0
+                    );
+                    return getTime(b) - getTime(a);
+                })
+                .slice(0, SESSION_SUMMARIES_CACHE_LIMIT);
+            localStorage.setItem(SESSION_SUMMARIES_CACHE_KEY, JSON.stringify(
+                Object.fromEntries(entries.map(({ cascadeId, summary }) => [cascadeId, summary]))
+            ));
+        } catch (_e) {
+            // localStorage の容量不足や古い形式のデータは一覧表示を妨げない。
+        }
+    }
 
     function escapeRegExp(string) {
         return (string || "").replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -1005,8 +1060,16 @@
 
             const { trajectorySummariesProvider: tP } = Of();
             const summariesState = nl(tP);
-            const summariesMap = summariesState?.summaries || tP?.getState()?.summaries || {};
+            const currentSummariesMap = summariesState?.summaries || tP?.getState()?.summaries || {};
+            const cachedSummariesMap = readSessionSummariesCache();
+            // セッション概要は Project 単位で供給されるため、移動前に保存した概要を補完する。
+            // 現在の Project の値を後勝ちにして、タイトル変更やアーカイブ状態を優先する。
+            const summariesMap = { ...cachedSummariesMap, ...currentSummariesMap };
             const sessionEntries = Object.entries(summariesMap).map(([k, V]) => ({ cascadeId: k, summary: V }));
+
+            yt(() => {
+                persistSessionSummaries(summariesMap);
+            }, [currentSummariesMap]);
 
             const activeCascadeId = wC();
             const rawCurTitle = bra(activeCascadeId, "");
